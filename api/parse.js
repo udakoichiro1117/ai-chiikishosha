@@ -1,0 +1,61 @@
+// Vercel Functions (api/ フォルダ経由)。GEMINI_API_KEY はサーバー側の環境変数としてのみ扱い、
+// フロントエンドには一切公開しない(03spec.md 技術環境 / 悪意イレギュラーケース 準拠)。
+// キー未設定、またはAI呼び出し失敗時は、クライアント側がルールベース抽出に自動フォールバックする
+// (main.js の tryAiParse を参照)。このファイルは「使えるときだけ使う」補助であり必須ではない。
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'method not allowed' })
+    return
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    res.status(503).json({ error: 'GEMINI_API_KEY is not configured' })
+    return
+  }
+
+  const { text, knownItems } = req.body || {}
+  if (typeof text !== 'string' || text.length === 0 || text.length > 500) {
+    res.status(400).json({ error: 'invalid text' })
+    return
+  }
+  const items = Array.isArray(knownItems) ? knownItems.slice(0, 50) : []
+
+  const prompt = `次の日本語の自然文から、飲食店の仕入れ希望条件をJSONで抽出してください。
+入力: "${text}"
+既知の品目候補: ${items.join('、') || 'なし'}
+出力は次のキーのみを持つJSONオブジェクトにしてください。値が読み取れない場合は null にしてください。
+{
+  "item": string|null,
+  "quantity": number|null,
+  "unit": "kg"|"個"|"本"|"袋"|"房"|null,
+  "neededDate": "YYYY-MM-DD"|null,
+  "region": string|null,
+  "allowOffGrade": boolean,
+  "priceLimit": number|null
+}
+JSON以外の文字は出力しないでください。`
+
+  try {
+    const r = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + apiKey,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0, responseMimeType: 'application/json' }
+        })
+      }
+    )
+    if (!r.ok) throw new Error(`gemini http ${r.status}`)
+    const data = await r.json()
+    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!raw) throw new Error('empty gemini response')
+    const parsed = JSON.parse(raw)
+    res.status(200).json({ rawText: text, ...parsed })
+  } catch (e) {
+    res.status(502).json({ error: 'ai parse failed', detail: String(e) })
+  }
+}
