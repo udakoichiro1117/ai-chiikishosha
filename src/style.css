@@ -35,18 +35,19 @@ body {
 .brand { font-weight: 700; font-size: 1.1rem; }
 .brand-sub { font-weight: 400; color: var(--muted); font-size: 0.85rem; margin-left: 6px; }
 
-.tabs { display: flex; gap: 8px; margin-left: auto; }
-.tab {
+.back-btn {
+  margin-left: auto;
   border: 1px solid var(--border);
   background: var(--surface);
   padding: 6px 14px;
   border-radius: 999px;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  color: var(--accent);
 }
-.tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 .reset-btn {
+  margin-left: auto;
   border: 1px solid var(--border);
   background: var(--surface);
   padding: 6px 12px;
@@ -64,6 +65,37 @@ body {
   flex-direction: column;
   gap: 20px;
 }
+
+.entry-choice {
+  text-align: center;
+  padding: 40px 0 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.entry-title { font-size: 1.4rem; margin: 0; }
+.entry-cards {
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  width: 100%;
+}
+.entry-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 28px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+}
+.entry-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+.entry-card-label { font-size: 1.1rem; font-weight: 700; color: var(--accent); }
+.entry-card-desc { font-size: 0.85rem; color: var(--muted); }
 
 .panel {
   background: var(--surface);

@@ -6,7 +6,7 @@ import { computeAllocation, describeInventoryDiff } from './matching.js'
 const STORAGE_KEY = 'ai-chiikishosha-state-v1'
 
 /** @type {{
- *  tab: 'restaurant'|'producer',
+ *  screen: 'home'|'restaurant'|'producer',
  *  producers: any[],
  *  requestText: string,
  *  parsed: any|null,
@@ -17,15 +17,19 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
 let state = loadState()
 
 function loadState() {
+  // ①入口は毎回「飲食店 / 生産者」の選択画面から始める(画面は保存しない)。
+  // 入力途中のデータ(登録済み出品・仕入れ案など)はlocalStorageから復元する。
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed.producers) && parsed.producers.length > 0) return parsed
+      if (Array.isArray(parsed.producers) && parsed.producers.length > 0) {
+        return { ...parsed, screen: 'home' }
+      }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
-    tab: 'restaurant',
+    screen: 'home',
     producers: buildDefaultProducers(),
     requestText: buildDefaultRequestText(),
     parsed: null,
@@ -49,7 +53,7 @@ function setState(patch) {
 
 function resetDemo() {
   state = {
-    tab: state.tab,
+    screen: state.screen,
     producers: buildDefaultProducers(),
     requestText: buildDefaultRequestText(),
     parsed: null,
@@ -168,17 +172,15 @@ function handleAddProducer(form) {
 
 function render() {
   const app = document.getElementById('app')
+  const onHome = state.screen === 'home'
   app.innerHTML = `
     <header class="topbar">
       <div class="brand">AI地域商社 <span class="brand-sub">仕入れ案MVP</span></div>
-      <nav class="tabs">
-        <button class="tab ${state.tab === 'restaurant' ? 'active' : ''}" data-tab="restaurant">飲食店として使う</button>
-        <button class="tab ${state.tab === 'producer' ? 'active' : ''}" data-tab="producer">生産者として使う</button>
-      </nav>
+      ${onHome ? '' : '<button class="back-btn" id="back-home">← 選択画面に戻る</button>'}
       <button class="reset-btn" id="reset-demo">デモデータに戻す</button>
     </header>
     <main class="content">
-      ${state.tab === 'restaurant' ? renderRestaurant() : renderProducer()}
+      ${onHome ? renderHome() : state.screen === 'restaurant' ? renderRestaurant() : renderProducer()}
     </main>
     <footer class="scope-note">
       このMVPが示すのは「仕入れ案の作成」までです。注文確定・在庫予約・決済・配送手配は対象外で、結果は常に「未確保」です。
@@ -187,10 +189,29 @@ function render() {
   attachEvents()
 }
 
+function renderHome() {
+  return `
+    <section class="entry-choice">
+      <h1 class="entry-title">どちらとして使いますか？</h1>
+      <p class="hint">①入口:まず立場を選んでください。</p>
+      <div class="entry-cards">
+        <button class="entry-card" data-screen="restaurant">
+          <span class="entry-card-label">飲食店側はこちら</span>
+          <span class="entry-card-desc">欲しい食材を伝えて、仕入れ案を作る</span>
+        </button>
+        <button class="entry-card" data-screen="producer">
+          <span class="entry-card-label">生産者側はこちら</span>
+          <span class="entry-card-desc">販売できるものを登録する</span>
+        </button>
+      </div>
+    </section>
+  `
+}
+
 function renderRestaurant() {
   return `
     <section class="panel">
-      <h2>① 入口 → ② 希望条件を入力</h2>
+      <h2>② 希望条件を入力</h2>
       <p class="hint">自然文のまま入力できます。(例:「明後日までに大阪近郊のトマトを10kg、多少形が悪くてもOK」)</p>
       <textarea id="request-text" rows="3">${escapeHtml(state.requestText)}</textarea>
       <div class="actions">
@@ -339,7 +360,7 @@ function renderSavedPlans() {
 function renderProducer() {
   return `
     <section class="panel">
-      <h2>① 入口 → ② 出品内容を登録</h2>
+      <h2>② 出品内容を登録</h2>
       <form id="add-producer-form" class="form-grid">
         <label>農家名<input name="farmName" type="text" required placeholder="例:D農家" /></label>
         <label>品目<input name="item" type="text" required placeholder="例:トマト" /></label>
@@ -393,9 +414,10 @@ function escapeHtml(s) {
 }
 
 function attachEvents() {
-  document.querySelectorAll('.tab').forEach(btn => {
-    btn.addEventListener('click', () => setState({ tab: btn.dataset.tab }))
+  document.querySelectorAll('.entry-card').forEach(btn => {
+    btn.addEventListener('click', () => setState({ screen: btn.dataset.screen }))
   })
+  document.getElementById('back-home')?.addEventListener('click', () => setState({ screen: 'home' }))
   document.getElementById('reset-demo')?.addEventListener('click', resetDemo)
 
   document.getElementById('parse-btn')?.addEventListener('click', handleParseClick)
