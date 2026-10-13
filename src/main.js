@@ -1,5 +1,6 @@
 import './style.css'
-import { buildDefaultProducers, buildDefaultRequest, DEMO_REGION, VEGETABLE_OPTIONS, REGION_OPTIONS } from './data.js'
+import { buildDefaultProducers, buildDefaultRequestText, DEMO_REGION } from './data.js'
+import { parseRequestText } from './parser.js'
 import { computeAllocation, describeInventoryDiff } from './matching.js'
 
 const STORAGE_KEY = 'ai-chiikishosha-state-v1'
@@ -9,7 +10,8 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  restaurantProfile: {storeName:string,address:string,station:string,contactName:string}|null,
  *  producerProfile: {farmName:string,address:string,station:string,contactName:string}|null,
  *  producers: any[],
- *  request: {item:string,quantity:number,unit:string,neededDate:string,region:string,allowOffGrade:boolean,priceLimit:number|null},
+ *  requestText: string,
+ *  parsed: any|null,
  *  result: any|null,
  *  resultSnapshot: any[]|null,
  *  savedPlans: any[]
@@ -36,7 +38,8 @@ function loadState() {
     listingDraft: null,
     listingStep: 2,
     producers: buildDefaultProducers(),
-    request: buildDefaultRequest(),
+    requestText: buildDefaultRequestText(),
+    parsed: null,
     result: null,
     resultSnapshot: null,
     savedPlans: []
@@ -63,7 +66,8 @@ function resetDemo() {
     listingDraft: null,
     listingStep: 2,
     producers: buildDefaultProducers(),
-    request: buildDefaultRequest(),
+    requestText: buildDefaultRequestText(),
+    parsed: null,
     result: null,
     resultSnapshot: null,
     savedPlans: []
@@ -72,21 +76,28 @@ function resetDemo() {
   render()
 }
 
+async function tryAiParse(text, knownItems) {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 4000)
+    const res = await fetch('/api/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, knownItems }),
+      signal: controller.signal
+    })
+    clearTimeout(timeout)
+    if (!res.ok) throw new Error('api not ok')
+    const json = await res.json()
+    if (!json || typeof json !== 'object') throw new Error('invalid json')
+    return { ...json, source: 'ai' }
+  } catch (e) {
+    return { ...parseRequestText(text, knownItems), source: 'rule' }
+  }
+}
+
 function knownItemNames() {
   return [...new Set(state.producers.map(p => p.item))]
-}
-
-function itemOptions() {
-  return [...new Set([...VEGETABLE_OPTIONS, ...knownItemNames()])]
-}
-
-function describeRequest(r) {
-  if (!r) return ''
-  const parts = [`${r.item || '(品目未選択)'} ${fmtNum(r.quantity)}${r.unit || ''}`]
-  if (r.neededDate) parts.push(r.neededDate)
-  if (r.region) parts.push(r.region)
-  parts.push(r.allowOffGrade ? '規格外可' : '規格外不可')
-  return parts.join(' / ')
 }
 
 function fmtNum(n) {
@@ -96,35 +107,34 @@ function fmtNum(n) {
 
 // ---------- イベントハンドラ ----------
 
-function readRequestForm() {
-  return {
-    item: document.getElementById('f-item').value || null,
-    quantity: Number(document.getElementById('f-quantity').value) || null,
-    unit: document.getElementById('f-unit').value,
-    neededDate: document.getElementById('f-date').value || null,
-    region: document.getElementById('f-region').value || null,
-    priceLimit: document.getElementById('f-price').value ? Number(document.getElementById('f-price').value) : null,
-    allowOffGrade: document.getElementById('f-offgrade').checked
-  }
+async function handleParseClick() {
+  const text = document.getElementById('request-text').value
+  setState({ requestText: text })
+  const parsed = await tryAiParse(text, knownItemNames())
+  setState({ parsed, result: null, resultSnapshot: null })
+}
+
+function handleParsedFieldChange(field, value) {
+  const parsed = { ...state.parsed, [field]: value }
+  setState({ parsed })
 }
 
 function handleComputeClick() {
-  const request = readRequestForm()
-  const result = computeAllocation(request, state.producers)
+  const result = computeAllocation(state.parsed, state.producers)
   const snapshot = state.producers.map(p => ({ id: p.id, farmName: p.farmName, quantity: p.quantity, unit: p.unit, available: p.available }))
-  setState({ request, result, resultSnapshot: snapshot })
+  setState({ result, resultSnapshot: snapshot })
 }
 
 function handleRecomputeClick() {
   const diffNotices = state.resultSnapshot ? describeInventoryDiff(state.resultSnapshot, state.producers) : []
-  const result = computeAllocation(state.request, state.producers)
+  const result = computeAllocation(state.parsed, state.producers)
   const snapshot = state.producers.map(p => ({ id: p.id, farmName: p.farmName, quantity: p.quantity, unit: p.unit, available: p.available }))
   setState({ result: { ...result, diffNotices }, resultSnapshot: snapshot })
 }
 
 function handleSavePlan() {
   if (!state.result || state.result.status !== 'success') return
-  const plan = { ...state.result, savedAt: new Date().toISOString(), requestSummary: describeRequest(state.request) }
+  const plan = { ...state.result, savedAt: new Date().toISOString(), requestText: state.requestText }
   setState({ savedPlans: [...state.savedPlans, plan] })
 }
 
@@ -299,48 +309,55 @@ function renderRestaurant() {
       <span>ログイン中:<strong>${escapeHtml(state.restaurantProfile?.storeName || '')}</strong>${state.restaurantProfile?.contactName ? `(${escapeHtml(state.restaurantProfile.contactName)})` : ''}</span>
       <button id="edit-restaurant-profile" class="link-btn">プロフィールを編集</button>
     </section>
-    ${renderRequestForm()}
+    <section class="panel">
+      <h2>② 希望条件を入力</h2>
+      <p class="hint">自然文のまま入力できます。(例:「明後日までに大阪近郊のトマトを10kg、多少形が悪くてもOK」)</p>
+      <textarea id="request-text" rows="3">${escapeHtml(state.requestText)}</textarea>
+      <div class="actions">
+        <button id="parse-btn" class="primary">AIで読み取る</button>
+      </div>
+    </section>
+
+    ${state.parsed ? renderParsedForm() : ''}
     ${state.result ? renderResult() : ''}
     ${state.savedPlans.length ? renderSavedPlans() : ''}
   `
 }
 
-function renderRequestForm() {
-  const r = state.request
-  const items = itemOptions()
-  const missing = !r.item || !r.quantity || !r.unit || !r.neededDate
+function renderParsedForm() {
+  const p = state.parsed
+  const items = knownItemNames()
+  const missing = !p.item || !p.quantity || !p.unit || !p.neededDate
   return `
     <section class="panel">
-      <h2>② 希望条件を入力</h2>
-      <p class="hint">必要な野菜をプルダウンから選び、数量・希望日などを指定してください。</p>
+      <h2>③ AIの整理結果を確認・修正</h2>
+      <p class="hint">読み取り方式: ${p.source === 'ai' ? 'AI(Gemini)' : 'ルールベース(AI停止時のフォールバック)'}</p>
       <div class="form-grid">
         <label>品目
           <select id="f-item">
-            ${items.map(i => `<option value="${escapeHtml(i)}" ${r.item === i ? 'selected' : ''}>${escapeHtml(i)}</option>`).join('')}
+            <option value="">選択してください</option>
+            ${items.map(i => `<option value="${escapeHtml(i)}" ${p.item === i ? 'selected' : ''}>${escapeHtml(i)}</option>`).join('')}
           </select>
         </label>
         <label>数量
-          <input id="f-quantity" type="number" min="0" step="0.1" value="${r.quantity ?? ''}" />
+          <input id="f-quantity" type="number" min="0" step="0.1" value="${p.quantity ?? ''}" />
         </label>
         <label>単位
           <select id="f-unit">
-            ${['kg', '個', '本', '袋', '房'].map(u => `<option value="${u}" ${r.unit === u ? 'selected' : ''}>${u}</option>`).join('')}
+            ${['kg', '個', '本', '袋', '房'].map(u => `<option value="${u}" ${p.unit === u ? 'selected' : ''}>${u}</option>`).join('')}
           </select>
         </label>
         <label>希望日
-          <input id="f-date" type="date" value="${r.neededDate || ''}" />
+          <input id="f-date" type="date" value="${p.neededDate || ''}" />
         </label>
-        <label>地域
-          <select id="f-region">
-            <option value="" ${!r.region ? 'selected' : ''}>指定なし</option>
-            ${REGION_OPTIONS.map(g => `<option value="${g}" ${r.region === g ? 'selected' : ''}>${g}</option>`).join('')}
-          </select>
+        <label>地域(任意)
+          <input id="f-region" type="text" value="${escapeHtml(p.region || '')}" placeholder="指定なし" />
         </label>
         <label>価格上限(任意・円)
-          <input id="f-price" type="number" min="0" value="${r.priceLimit ?? ''}" placeholder="指定なし" />
+          <input id="f-price" type="number" min="0" value="${p.priceLimit ?? ''}" placeholder="指定なし" />
         </label>
         <label class="checkbox">
-          <input id="f-offgrade" type="checkbox" ${r.allowOffGrade ? 'checked' : ''} />
+          <input id="f-offgrade" type="checkbox" ${p.allowOffGrade ? 'checked' : ''} />
           規格外(形の不揃い等)を許容する
         </label>
       </div>
@@ -432,7 +449,7 @@ function renderSavedPlans() {
       <h2>⑤ 保存済みの仕入れ案(相談用)</h2>
       <ul class="saved-list">
         ${state.savedPlans.map(p => `
-          <li>${new Date(p.savedAt).toLocaleString('ja-JP')} - ${fmtNum(p.totalQuantity)}(合計${fmtNum(p.totalPrice)}円) - 「${escapeHtml(p.requestSummary)}」</li>
+          <li>${new Date(p.savedAt).toLocaleString('ja-JP')} - ${fmtNum(p.totalQuantity)}(合計${fmtNum(p.totalPrice)}円) - 「${escapeHtml(p.requestText)}」</li>
         `).join('')}
       </ul>
     </section>
@@ -556,7 +573,22 @@ function attachEvents() {
   document.getElementById('edit-restaurant-profile')?.addEventListener('click', () => setState({ screen: 'restaurant-register' }))
   document.getElementById('edit-producer-profile')?.addEventListener('click', () => setState({ screen: 'producer-register' }))
 
-  document.getElementById('compute-btn')?.addEventListener('click', handleComputeClick)
+  document.getElementById('parse-btn')?.addEventListener('click', handleParseClick)
+  document.getElementById('compute-btn')?.addEventListener('click', () => {
+    const p = state.parsed
+    const updated = {
+      ...p,
+      item: document.getElementById('f-item').value || null,
+      quantity: Number(document.getElementById('f-quantity').value) || null,
+      unit: document.getElementById('f-unit').value,
+      neededDate: document.getElementById('f-date').value || null,
+      region: document.getElementById('f-region').value || null,
+      priceLimit: document.getElementById('f-price').value ? Number(document.getElementById('f-price').value) : null,
+      allowOffGrade: document.getElementById('f-offgrade').checked
+    }
+    setState({ parsed: updated })
+    handleComputeClick()
+  })
   document.getElementById('recompute-btn')?.addEventListener('click', handleRecomputeClick)
   document.getElementById('save-plan-btn')?.addEventListener('click', handleSavePlan)
 

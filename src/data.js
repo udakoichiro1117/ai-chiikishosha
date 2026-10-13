@@ -73,24 +73,6 @@ export function buildDefaultProducers() {
   ]
 }
 
-// 飲食店側②の品目プルダウンに出す候補。登録済みの品目(knownItemNames)と
-// 合わせて重複排除した上で表示する。
-export const VEGETABLE_OPTIONS = [
-  'トマト', 'なす', '賀茂なす', 'きゅうり', 'ねぎ', '万願寺とうがらし',
-  'ピーマン', 'じゃがいも', '玉ねぎ', 'ほうれん草', 'オクラ'
-]
-
-export const REGION_OPTIONS = ['大阪近郊', '大阪市内', '北摂', '能勢', '京都', '全国']
-
-export function buildDefaultRequest() {
-  const today = new Date()
-  return {
-    item: 'トマト',
-    quantity: 10,
-    unit: 'kg',
-    neededDate: addDays(today, 2),
-    region: DEMO_REGION,
-    allowOffGrade: true,
-    priceLimit: null
-  }
+export function buildDefaultRequestText() {
+  return '明後日までに大阪近郊のトマトを10kg、多少形が悪くてもOK'
 }
