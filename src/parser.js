@@ -2,12 +2,18 @@
 // 03spec.md 3.「AIを使う意味」の通り、ここでの抽出結果は確定ではなく、
 // 画面上で利用者が確認・修正してから「仕入れ案を作る」に進む前提。
 
+import { REGION_BROAD_OPTIONS, OSAKA_CITY_OPTIONS } from './data.js'
+
 const UNIT_ALIASES = {
   'kg': 'kg', 'キロ': 'kg', 'きろ': 'kg',
   '個': '個', '玉': '個', '本': '本', '袋': '袋', '房': '房'
 }
 
-const REGION_KEYWORDS = ['大阪近郊', '大阪市内', '北摂', '能勢', '京都', '全国']
+// 地域キーワードはdata.jsの選択肢(広域の目安+大阪府の市)と同じものを使う。
+// 市区町村名は文字列が長い順に判定しないと、例えば「大阪市」が先に「大阪」を
+// 含む他の候補より誤って短く一致することがあるため、長い順に並べ替える。
+const REGION_KEYWORDS = [...REGION_BROAD_OPTIONS, ...OSAKA_CITY_OPTIONS]
+  .sort((a, b) => b.length - a.length)
 
 const OFFGRADE_YES_PATTERNS = [
   '形が悪くても', '形悪くても', '形不揃い', '不揃いでも', '不揃いOK', '不揃いok',

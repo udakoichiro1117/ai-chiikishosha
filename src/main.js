@@ -1,5 +1,5 @@
 import './style.css'
-import { buildDefaultProducers, buildDefaultRequestText, DEMO_REGION, VEGETABLE_OPTIONS, REGION_OPTIONS } from './data.js'
+import { buildDefaultProducers, buildDefaultRequestText, DEMO_REGION, VEGETABLE_OPTIONS, REGION_BROAD_OPTIONS, OSAKA_CITY_OPTIONS } from './data.js'
 import { parseRequestText, offGradeMentioned } from './parser.js'
 import { computeAllocation, describeInventoryDiff } from './matching.js'
 
@@ -91,6 +91,14 @@ function knownItemNames() {
 
 function itemOptions() {
   return [...new Set([...VEGETABLE_OPTIONS, ...knownItemNames()])]
+}
+
+function renderRegionOptions(selected) {
+  const opt = (g) => `<option value="${escapeHtml(g)}" ${selected === g ? 'selected' : ''}>${escapeHtml(g)}</option>`
+  return `
+    <optgroup label="広域の目安">${REGION_BROAD_OPTIONS.map(opt).join('')}</optgroup>
+    <optgroup label="大阪府の市">${OSAKA_CITY_OPTIONS.map(opt).join('')}</optgroup>
+  `
 }
 
 function fmtNum(n) {
@@ -351,7 +359,7 @@ function renderRestaurantRegister() {
         <label>受取希望エリア
           <select name="preferredRegion">
             <option value="" ${!p.preferredRegion ? 'selected' : ''}>指定なし</option>
-            ${REGION_OPTIONS.map(g => `<option value="${g}" ${p.preferredRegion === g ? 'selected' : ''}>${g}</option>`).join('')}
+            ${renderRegionOptions(p.preferredRegion)}
           </select>
         </label>
         <label class="checkbox">
@@ -455,7 +463,7 @@ function renderParsedForm() {
         <label>地域
           <select id="f-region">
             <option value="" ${!p.region ? 'selected' : ''}>指定なし</option>
-            ${REGION_OPTIONS.map(g => `<option value="${g}" ${p.region === g ? 'selected' : ''}>${g}</option>`).join('')}
+            ${renderRegionOptions(p.region)}
           </select>
         </label>
         <label>価格上限(任意・円)
