@@ -37,9 +37,13 @@ export default async function handler(req, res) {
 }
 JSON以外の文字は出力しないでください。`
 
+  // モデル名は世代交代が早いため決め打ちにせず、環境変数GEMINI_MODELで上書きできるようにする。
+  // 未設定の場合のみ既定値を使う(Google AI Studioの現行モデル一覧で要確認)。
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+
   try {
     const r = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + apiKey,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -49,7 +53,7 @@ JSON以外の文字は出力しないでください。`
         })
       }
     )
-    if (!r.ok) throw new Error(`gemini http ${r.status}`)
+    if (!r.ok) throw new Error(`gemini http ${r.status}: ${(await r.text()).slice(0, 300)}`)
     const data = await r.json()
     const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text
     if (!raw) throw new Error('empty gemini response')
