@@ -39,7 +39,7 @@ JSON以外の文字は出力しないでください。`
 
   // モデル名は世代交代が早いため決め打ちにせず、環境変数GEMINI_MODELで上書きできるようにする。
   // 未設定の場合のみ既定値を使う(Google AI Studioの現行モデル一覧で要確認)。
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+  const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
 
   try {
     const r = await fetch(
