@@ -224,16 +224,53 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .warn { color: var(--warn); background: var(--warn-soft); padding: 8px 12px; border-radius: 6px; }
 .diff-notice { color: var(--warn); background: var(--warn-soft); padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; }
 
+.formula-line {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  background: var(--surface-2, var(--accent-soft));
+  border-radius: 8px;
+}
+
 .summary-line {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 8px 20px;
   background: var(--accent-soft);
   padding: 10px 14px;
   border-radius: 6px;
   margin-bottom: 14px;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
+.summary-line span { display: flex; flex-direction: column; gap: 2px; }
+.summary-line strong { font-size: 0.95rem; }
+
+.alloc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.alloc-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.alloc-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.alloc-farm { font-weight: 700; font-size: 0.95rem; }
+.alloc-amount { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
+.alloc-unit { font-size: 0.85rem; font-weight: 400; color: var(--muted); margin-left: 2px; }
+.alloc-price { font-size: 0.9rem; }
+.alloc-unitprice { color: var(--muted); font-size: 0.78rem; margin-left: 4px; }
+.alloc-total { background: var(--accent-soft); border-color: var(--accent); }
+.badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.badge-normal { background: var(--producer-soft); color: var(--producer-accent); }
+.badge-offgrade { background: var(--restaurant-soft); color: var(--restaurant-accent); }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }

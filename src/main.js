@@ -1,5 +1,6 @@
 import './style.css'
-import { buildDefaultProducers, buildDefaultRequest, DEMO_REGION, VEGETABLE_OPTIONS, REGION_OPTIONS } from './data.js'
+import { buildDefaultProducers, buildDefaultRequestText, DEMO_REGION, VEGETABLE_OPTIONS, REGION_OPTIONS } from './data.js'
+import { parseRequestText } from './parser.js'
 import { computeAllocation, describeInventoryDiff } from './matching.js'
 
 const STORAGE_KEY = 'ai-chiikishosha-state-v1'
@@ -9,7 +10,8 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  restaurantProfile: {storeName:string,address:string,station:string,contactName:string}|null,
  *  producerProfile: {farmName:string,address:string,station:string,contactName:string}|null,
  *  producers: any[],
- *  request: {item:string,quantity:number,unit:string,neededDate:string,region:string,allowOffGrade:boolean,priceLimit:number|null},
+ *  requestText: string,
+ *  parsed: {item:string,quantity:number,unit:string,neededDate:string,region:string,allowOffGrade:boolean,priceLimit:number|null,source:string}|null,
  *  result: any|null,
  *  resultSnapshot: any[]|null,
  *  savedPlans: any[]
@@ -36,7 +38,8 @@ function loadState() {
     listingDraft: null,
     listingStep: 2,
     producers: buildDefaultProducers(),
-    request: buildDefaultRequest(),
+    requestText: buildDefaultRequestText(),
+    parsed: null,
     result: null,
     resultSnapshot: null,
     savedPlans: []
@@ -63,7 +66,8 @@ function resetDemo() {
     listingDraft: null,
     listingStep: 2,
     producers: buildDefaultProducers(),
-    request: buildDefaultRequest(),
+    requestText: buildDefaultRequestText(),
+    parsed: null,
     result: null,
     resultSnapshot: null,
     savedPlans: []
@@ -80,15 +84,6 @@ function itemOptions() {
   return [...new Set([...VEGETABLE_OPTIONS, ...knownItemNames()])]
 }
 
-function describeRequest(r) {
-  if (!r) return ''
-  const parts = [`${r.item || '(品目未選択)'} ${fmtNum(r.quantity)}${r.unit || ''}`]
-  if (r.neededDate) parts.push(r.neededDate)
-  if (r.region) parts.push(r.region)
-  parts.push(r.allowOffGrade ? '規格外可' : '規格外不可')
-  return parts.join(' / ')
-}
-
 function fmtNum(n) {
   if (n === null || n === undefined) return '―'
   return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
@@ -96,7 +91,27 @@ function fmtNum(n) {
 
 // ---------- イベントハンドラ ----------
 
-function readRequestForm() {
+async function tryAiParse(text, knownItems) {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 4000)
+    const res = await fetch('/api/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, knownItems }),
+      signal: controller.signal
+    })
+    clearTimeout(timeout)
+    if (!res.ok) throw new Error('api not ok')
+    const json = await res.json()
+    if (!json || typeof json !== 'object') throw new Error('invalid json')
+    return { ...json, source: 'ai' }
+  } catch (e) {
+    return { ...parseRequestText(text, knownItems), source: 'rule' }
+  }
+}
+
+function readParsedForm() {
   return {
     item: document.getElementById('f-item').value || null,
     quantity: Number(document.getElementById('f-quantity').value) || null,
@@ -108,33 +123,47 @@ function readRequestForm() {
   }
 }
 
+async function handleParseClick() {
+  const text = document.getElementById('request-text').value
+  setState({ requestText: text })
+  const parsed = await tryAiParse(text, knownItemNames())
+  setState({ parsed, result: null, resultSnapshot: null })
+}
+
 function handleQuickStart() {
   const restaurantProfile = state.restaurantProfile || {
-    storeName: '小料理屋 みかみ(デモ)',
+    storeName: '小料理屋(デモ)',
     address: '大阪市福島区',
     station: 'JR福島駅',
-    contactName: '三上由香'
+    contactName: 'デモユーザー'
   }
-  setState({ restaurantProfile, request: buildDefaultRequest(), result: null, resultSnapshot: null, screen: 'restaurant' })
+  setState({
+    restaurantProfile,
+    requestText: buildDefaultRequestText(),
+    parsed: null,
+    result: null,
+    resultSnapshot: null,
+    screen: 'restaurant'
+  })
 }
 
 function handleComputeClick() {
-  const request = readRequestForm()
-  const result = computeAllocation(request, state.producers)
+  const parsed = readParsedForm()
+  const result = computeAllocation(parsed, state.producers)
   const snapshot = state.producers.map(p => ({ id: p.id, farmName: p.farmName, quantity: p.quantity, unit: p.unit, available: p.available }))
-  setState({ request, result, resultSnapshot: snapshot })
+  setState({ parsed, result, resultSnapshot: snapshot })
 }
 
 function handleRecomputeClick() {
   const diffNotices = state.resultSnapshot ? describeInventoryDiff(state.resultSnapshot, state.producers) : []
-  const result = computeAllocation(state.request, state.producers)
+  const result = computeAllocation(state.parsed, state.producers)
   const snapshot = state.producers.map(p => ({ id: p.id, farmName: p.farmName, quantity: p.quantity, unit: p.unit, available: p.available }))
   setState({ result: { ...result, diffNotices }, resultSnapshot: snapshot })
 }
 
 function handleSavePlan() {
   if (!state.result || state.result.status !== 'success') return
-  const plan = { ...state.result, savedAt: new Date().toISOString(), requestSummary: describeRequest(state.request) }
+  const plan = { ...state.result, savedAt: new Date().toISOString(), requestSummary: state.requestText }
   setState({ savedPlans: [...state.savedPlans, plan] })
 }
 
@@ -255,7 +284,7 @@ function renderHome() {
         <button class="entry-card restaurant-card" data-screen="restaurant">
           <span class="entry-card-icon">食</span>
           <span class="entry-card-label">飲食店側はこちら</span>
-          <span class="entry-card-desc">大阪・福島の小料理屋「みかみ」三上さん:欲しい野菜を選んでまとめて仕入れ案を作る</span>
+          <span class="entry-card-desc">欲しい食材の条件をまとめて、最適な仕入れ案を作る</span>
         </button>
         <button class="entry-card producer-card" data-screen="producer">
           <span class="entry-card-icon">産</span>
@@ -267,7 +296,7 @@ function renderHome() {
 
     <section class="quickstart">
       <p class="quickstart-label">はじめての方はこちら</p>
-      <button id="quickstart-btn" class="quickstart-btn">デモ条件(トマト10kg・明後日・大阪近郊・形不揃いOK)で試してみる</button>
+      <button id="quickstart-btn" class="quickstart-btn">「明後日までに大阪近郊のトマトを10kg、形不揃いOK」を入力してみる</button>
     </section>
   `
 }
@@ -320,48 +349,58 @@ function renderRestaurant() {
       <span>ログイン中:<strong>${escapeHtml(state.restaurantProfile?.storeName || '')}</strong>${state.restaurantProfile?.contactName ? `(${escapeHtml(state.restaurantProfile.contactName)})` : ''}</span>
       <button id="edit-restaurant-profile" class="link-btn">プロフィールを編集</button>
     </section>
-    ${renderRequestForm()}
+    <section class="panel">
+      <h2>② 希望条件を入力</h2>
+      <p class="hint">自然文のまま入力できます。(例:「明後日までに大阪近郊のトマトを10kg、多少形が悪くてもOK」)</p>
+      <textarea id="request-text" rows="3">${escapeHtml(state.requestText)}</textarea>
+      <div class="actions">
+        <button id="parse-btn" class="primary">AIで読み取る</button>
+      </div>
+    </section>
+
+    ${state.parsed ? renderParsedForm() : ''}
     ${state.result ? renderResult() : ''}
     ${state.savedPlans.length ? renderSavedPlans() : ''}
   `
 }
 
-function renderRequestForm() {
-  const r = state.request
+function renderParsedForm() {
+  const p = state.parsed
   const items = itemOptions()
-  const missing = !r.item || !r.quantity || !r.unit || !r.neededDate
+  const missing = !p.item || !p.quantity || !p.unit || !p.neededDate
   return `
     <section class="panel">
-      <h2>② 希望条件を入力</h2>
-      <p class="hint">必要な野菜をプルダウンから選び、数量・希望日などを指定してください。</p>
+      <h2>③ AIの整理結果を確認・修正</h2>
+      <p class="hint">読み取り方式:${p.source === 'ai' ? 'AI(Gemini)' : 'ルールベース(AI停止時のフォールバック)'}。内容がおかしければここで直接修正できます。</p>
       <div class="form-grid">
         <label>品目
           <select id="f-item">
-            ${items.map(i => `<option value="${escapeHtml(i)}" ${r.item === i ? 'selected' : ''}>${escapeHtml(i)}</option>`).join('')}
+            <option value="">選択してください</option>
+            ${items.map(i => `<option value="${escapeHtml(i)}" ${p.item === i ? 'selected' : ''}>${escapeHtml(i)}</option>`).join('')}
           </select>
         </label>
         <label>数量
-          <input id="f-quantity" type="number" min="0" step="0.1" value="${r.quantity ?? ''}" />
+          <input id="f-quantity" type="number" min="0" step="0.1" value="${p.quantity ?? ''}" />
         </label>
         <label>単位
           <select id="f-unit">
-            ${['kg', '個', '本', '袋', '房'].map(u => `<option value="${u}" ${r.unit === u ? 'selected' : ''}>${u}</option>`).join('')}
+            ${['kg', '個', '本', '袋', '房'].map(u => `<option value="${u}" ${p.unit === u ? 'selected' : ''}>${u}</option>`).join('')}
           </select>
         </label>
         <label>希望日
-          <input id="f-date" type="date" value="${r.neededDate || ''}" />
+          <input id="f-date" type="date" value="${p.neededDate || ''}" />
         </label>
         <label>地域
           <select id="f-region">
-            <option value="" ${!r.region ? 'selected' : ''}>指定なし</option>
-            ${REGION_OPTIONS.map(g => `<option value="${g}" ${r.region === g ? 'selected' : ''}>${g}</option>`).join('')}
+            <option value="" ${!p.region ? 'selected' : ''}>指定なし</option>
+            ${REGION_OPTIONS.map(g => `<option value="${g}" ${p.region === g ? 'selected' : ''}>${g}</option>`).join('')}
           </select>
         </label>
         <label>価格上限(任意・円)
-          <input id="f-price" type="number" min="0" value="${r.priceLimit ?? ''}" placeholder="指定なし" />
+          <input id="f-price" type="number" min="0" value="${p.priceLimit ?? ''}" placeholder="指定なし" />
         </label>
         <label class="checkbox">
-          <input id="f-offgrade" type="checkbox" ${r.allowOffGrade ? 'checked' : ''} />
+          <input id="f-offgrade" type="checkbox" ${p.allowOffGrade ? 'checked' : ''} />
           規格外(形の不揃い等)を許容する
         </label>
       </div>
@@ -402,30 +441,34 @@ function renderResult() {
     `
   }
   // success
+  const formula = r.allocation.map(a => `${escapeHtml(a.farm.farmName)} ${fmtNum(a.amount)}${a.farm.unit}`).join(' ＋ ')
   return `
     <section class="panel result success">
       <h2>④ 仕入れ案</h2>
       ${r.diffNotices && r.diffNotices.length ? `<p class="diff-notice">${r.diffNotices.map(escapeHtml).join(' ')}</p>` : ''}
+      <p class="formula-line">${formula} ＝ <strong>${fmtNum(r.totalQuantity)}</strong></p>
       <div class="summary-line">
-        <span>希望数量を満たすか:<strong>満たす</strong></span>
-        <span>いつ・どこで受け取るか:<strong>${escapeHtml(r.neededDate)} ${escapeHtml(r.deliveryTime || '')} ${escapeHtml(r.deliveryLocation || '')}</strong></span>
-        <span>費用はいくらか:<strong>${fmtNum(r.totalPrice)}円(税込)</strong></span>
+        <span>希望数量を満たすか<strong>満たす</strong></span>
+        <span>いつ・どこで受け取るか<strong>${escapeHtml(r.neededDate)} ${escapeHtml(r.deliveryTime || '')} ${escapeHtml(r.deliveryLocation || '')}</strong></span>
+        <span>費用はいくらか<strong>${fmtNum(r.totalPrice)}円(税込)</strong></span>
       </div>
-      <table class="alloc-table">
-        <thead><tr><th>生産者</th><th>配分</th><th>商品代</th><th>備考</th></tr></thead>
-        <tbody>
-          ${r.allocation.map(a => `
-            <tr>
-              <td>${escapeHtml(a.farm.farmName)}</td>
-              <td>${fmtNum(a.amount)}${a.farm.unit}</td>
-              <td>${fmtNum(a.amount * a.farm.unitPrice)}円</td>
-              <td>${a.farm.isOffGrade ? `規格外(${escapeHtml(a.farm.offGradeReason || '形の不揃い')})含む` : '通常品'}</td>
-            </tr>`).join('')}
-          <tr class="total-row">
-            <td>合計</td><td>${fmtNum(r.totalQuantity)}</td><td>${fmtNum(r.totalPrice)}円(税込)</td><td></td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="alloc-grid">
+        ${r.allocation.map(a => `
+          <div class="alloc-card">
+            <div class="alloc-card-head">
+              <span class="alloc-farm">${escapeHtml(a.farm.farmName)}</span>
+              ${a.farm.isOffGrade ? `<span class="badge badge-offgrade">規格外:${escapeHtml(a.farm.offGradeReason || '形の不揃い')}</span>` : '<span class="badge badge-normal">通常品</span>'}
+            </div>
+            <div class="alloc-amount">${fmtNum(a.amount)}<span class="alloc-unit">${escapeHtml(a.farm.unit)}</span></div>
+            <div class="alloc-price">${fmtNum(a.amount * a.farm.unitPrice)}円<span class="alloc-unitprice">(${fmtNum(a.farm.unitPrice)}円/${escapeHtml(a.farm.unit)})</span></div>
+          </div>
+        `).join('')}
+        <div class="alloc-card alloc-total">
+          <div class="alloc-card-head"><span class="alloc-farm">合計</span></div>
+          <div class="alloc-amount">${fmtNum(r.totalQuantity)}</div>
+          <div class="alloc-price">${fmtNum(r.totalPrice)}円<span class="alloc-unitprice">(税込)</span></div>
+        </div>
+      </div>
       <p class="status-note">状態:農家承認前・在庫未確保。この案は注文確定ではありません。</p>
       <div class="actions">
         <button id="recompute-btn">在庫の最新状態で再計算</button>
@@ -578,6 +621,7 @@ function attachEvents() {
   document.getElementById('edit-restaurant-profile')?.addEventListener('click', () => setState({ screen: 'restaurant-register' }))
   document.getElementById('edit-producer-profile')?.addEventListener('click', () => setState({ screen: 'producer-register' }))
 
+  document.getElementById('parse-btn')?.addEventListener('click', handleParseClick)
   document.getElementById('compute-btn')?.addEventListener('click', handleComputeClick)
   document.getElementById('recompute-btn')?.addEventListener('click', handleRecomputeClick)
   document.getElementById('save-plan-btn')?.addEventListener('click', handleSavePlan)
