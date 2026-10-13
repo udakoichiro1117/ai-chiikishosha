@@ -58,6 +58,13 @@ function extractOffGrade(text) {
   return false // 指定なしは「含めない」を安全側のデフォルトにする（3.「配分では規格外可否の反映」参照）
 }
 
+// 自然文中に規格外の可否を示すキーワードが実際に含まれているか。
+// 含まれていなければ「未指定」とみなし、呼び出し側で飲食店の既定値にフォールバックできるようにする。
+export function offGradeMentioned(text) {
+  const t = text || ''
+  return OFFGRADE_YES_PATTERNS.some(p => t.includes(p)) || OFFGRADE_NO_PATTERNS.some(p => t.includes(p))
+}
+
 function extractPriceLimit(text) {
   const m = text.match(/(\d+)\s*円\s*(以内|まで)/)
   return m ? Number(m[1]) : null

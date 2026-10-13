@@ -163,6 +163,20 @@ body {
 }
 .quickstart-btn:hover { background: var(--accent-soft); }
 
+.demo-fill-row { margin-top: 0; margin-bottom: 12px; }
+.ghost-btn {
+  padding: 8px 14px;
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.82rem;
+  cursor: pointer;
+  width: 100%;
+  text-align: center;
+}
+.ghost-btn:hover { background: var(--surface); }
+
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);

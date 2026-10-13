@@ -1,13 +1,13 @@
 import './style.css'
 import { buildDefaultProducers, buildDefaultRequestText, DEMO_REGION, VEGETABLE_OPTIONS, REGION_OPTIONS } from './data.js'
-import { parseRequestText } from './parser.js'
+import { parseRequestText, offGradeMentioned } from './parser.js'
 import { computeAllocation, describeInventoryDiff } from './matching.js'
 
 const STORAGE_KEY = 'ai-chiikishosha-state-v1'
 
 /** @type {{
  *  screen: 'home'|'restaurant'|'producer'|'restaurant-register'|'producer-register',
- *  restaurantProfile: {storeName:string,address:string,station:string,contactName:string}|null,
+ *  restaurantProfile: {storeName:string,preferredRegion:string,defaultAllowOffGrade:boolean}|null,
  *  producerProfile: {farmName:string,address:string,station:string,contactName:string}|null,
  *  producers: any[],
  *  requestText: string,
@@ -126,16 +126,26 @@ function readParsedForm() {
 async function handleParseClick() {
   const text = document.getElementById('request-text').value
   setState({ requestText: text })
-  const parsed = await tryAiParse(text, knownItemNames())
+  const extracted = await tryAiParse(text, knownItemNames())
+  // 自然文に地域・規格外可否の指定がなければ、登録済みの受取希望条件を既定値として補う。
+  const prefs = state.restaurantProfile
+  const parsed = { ...extracted }
+  if (!parsed.region && prefs?.preferredRegion) parsed.region = prefs.preferredRegion
+  if (extracted.source === 'rule' && !offGradeMentioned(text) && prefs) {
+    parsed.allowOffGrade = prefs.defaultAllowOffGrade
+  }
   setState({ parsed, result: null, resultSnapshot: null })
+}
+
+function handleDemoFill() {
+  setState({ requestText: buildDefaultRequestText(), parsed: null, result: null, resultSnapshot: null })
 }
 
 function handleQuickStart() {
   const restaurantProfile = state.restaurantProfile || {
     storeName: '小料理屋(デモ)',
-    address: '大阪市福島区',
-    station: 'JR福島駅',
-    contactName: 'デモユーザー'
+    preferredRegion: DEMO_REGION,
+    defaultAllowOffGrade: true
   }
   setState({
     restaurantProfile,
@@ -187,9 +197,17 @@ function handleRestaurantRegisterSubmit(form) {
   const data = new FormData(form)
   const restaurantProfile = {
     storeName: String(data.get('storeName') || ''),
-    address: String(data.get('address') || ''),
-    station: String(data.get('station') || ''),
-    contactName: String(data.get('contactName') || '')
+    preferredRegion: String(data.get('preferredRegion') || ''),
+    defaultAllowOffGrade: data.get('defaultAllowOffGrade') === 'on'
+  }
+  setState({ restaurantProfile, screen: 'restaurant' })
+}
+
+function handleRestaurantRegisterSkip() {
+  const restaurantProfile = state.restaurantProfile || {
+    storeName: '未設定の店舗',
+    preferredRegion: '',
+    defaultAllowOffGrade: false
   }
   setState({ restaurantProfile, screen: 'restaurant' })
 }
@@ -306,17 +324,24 @@ function renderRestaurantRegister() {
   const isEdit = !!state.restaurantProfile
   return `
     <section class="panel">
-      <h2>① 入口:店舗情報の登録${isEdit ? '(編集)' : ''}</h2>
-      <p class="hint">初回のみ入力します。次回以降はこの端末で自動的にログイン状態が保たれ、この画面は表示されません。</p>
+      <h2>① 受取条件を設定${isEdit ? '(編集)' : ''}</h2>
+      <p class="hint">この画面の目的は店舗の登録ではなく、「欲しい食材・数量・受取条件を伝えること」の準備です。ここで決めた内容は次の②の初期値になり、自然文で省略しても自動的に補われます。あとからいつでも変更できます。</p>
       <form id="restaurant-register-form" class="form-grid">
         <label>店舗名<input name="storeName" type="text" required value="${escapeHtml(p.storeName || '')}" placeholder="例:小料理屋 みかみ" /></label>
-        <label>住所<input name="address" type="text" required value="${escapeHtml(p.address || '')}" placeholder="例:大阪市福島区..." /></label>
-        <label>最寄り駅<input name="station" type="text" value="${escapeHtml(p.station || '')}" placeholder="例:JR福島駅" /></label>
-        <label>担当者名<input name="contactName" type="text" value="${escapeHtml(p.contactName || '')}" placeholder="例:三上由香" /></label>
+        <label>受取希望エリア
+          <select name="preferredRegion">
+            <option value="" ${!p.preferredRegion ? 'selected' : ''}>指定なし</option>
+            ${REGION_OPTIONS.map(g => `<option value="${g}" ${p.preferredRegion === g ? 'selected' : ''}>${g}</option>`).join('')}
+          </select>
+        </label>
+        <label class="checkbox">
+          <input name="defaultAllowOffGrade" type="checkbox" ${p.defaultAllowOffGrade ? 'checked' : ''} />
+          規格外・形の不揃い食材も基本的に許容する
+        </label>
       </form>
       <div class="actions">
-        <button id="restaurant-register-submit" class="primary">登録して進む</button>
-        ${isEdit ? '<button id="cancel-register">キャンセル</button>' : ''}
+        <button id="restaurant-register-submit" class="primary">設定して進む</button>
+        ${isEdit ? '<button id="cancel-register">キャンセル</button>' : '<button id="restaurant-register-skip">スキップ(あとで設定する)</button>'}
       </div>
     </section>
   `
@@ -344,14 +369,23 @@ function renderProducerRegister() {
 }
 
 function renderRestaurant() {
+  const prefsLine = state.restaurantProfile
+    ? [
+        state.restaurantProfile.preferredRegion ? `受取希望:${state.restaurantProfile.preferredRegion}` : null,
+        `規格外:${state.restaurantProfile.defaultAllowOffGrade ? '基本許容' : '基本不可'}`
+      ].filter(Boolean).join(' / ')
+    : ''
   return `
     <section class="panel profile-bar">
-      <span>ログイン中:<strong>${escapeHtml(state.restaurantProfile?.storeName || '')}</strong>${state.restaurantProfile?.contactName ? `(${escapeHtml(state.restaurantProfile.contactName)})` : ''}</span>
-      <button id="edit-restaurant-profile" class="link-btn">プロフィールを編集</button>
+      <span>ログイン中:<strong>${escapeHtml(state.restaurantProfile?.storeName || '')}</strong>${prefsLine ? ` (${escapeHtml(prefsLine)})` : ''}</span>
+      <button id="edit-restaurant-profile" class="link-btn">受取条件を編集</button>
     </section>
     <section class="panel">
-      <h2>② 希望条件を入力</h2>
+      <h2>② 欲しい食材・数量・受取条件を伝える</h2>
       <p class="hint">自然文のまま入力できます。(例:「明後日までに大阪近郊のトマトを10kg、多少形が悪くてもOK」)</p>
+      <div class="actions demo-fill-row">
+        <button id="demo-fill-btn" class="ghost-btn">【デモ用】明後日までに大阪近郊のトマトを10kg、形不揃いOK を入力</button>
+      </div>
       <textarea id="request-text" rows="3">${escapeHtml(state.requestText)}</textarea>
       <div class="actions">
         <button id="parse-btn" class="primary">AIで読み取る</button>
@@ -607,6 +641,8 @@ function attachEvents() {
     if (!form.reportValidity()) return
     handleRestaurantRegisterSubmit(form)
   })
+  document.getElementById('restaurant-register-skip')?.addEventListener('click', handleRestaurantRegisterSkip)
+  document.getElementById('demo-fill-btn')?.addEventListener('click', handleDemoFill)
   document.getElementById('producer-register-submit')?.addEventListener('click', (e) => {
     e.preventDefault()
     const form = document.getElementById('producer-register-form')
