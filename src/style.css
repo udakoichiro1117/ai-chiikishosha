@@ -104,6 +104,25 @@ body {
   padding: 18px 20px;
 }
 .panel h2 { margin: 0 0 10px; font-size: 1.05rem; }
+
+.profile-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 0.85rem;
+  background: var(--accent-soft);
+}
+.link-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.85rem;
+}
 .hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 10px; }
 
 textarea, input[type=text], input[type=number], input[type=date], select {

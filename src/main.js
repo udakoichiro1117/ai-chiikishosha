@@ -6,7 +6,9 @@ import { computeAllocation, describeInventoryDiff } from './matching.js'
 const STORAGE_KEY = 'ai-chiikishosha-state-v1'
 
 /** @type {{
- *  screen: 'home'|'restaurant'|'producer',
+ *  screen: 'home'|'restaurant'|'producer'|'restaurant-register'|'producer-register',
+ *  restaurantProfile: {storeName:string,address:string,station:string,contactName:string}|null,
+ *  producerProfile: {farmName:string,address:string,station:string,contactName:string}|null,
  *  producers: any[],
  *  requestText: string,
  *  parsed: any|null,
@@ -18,18 +20,21 @@ let state = loadState()
 
 function loadState() {
   // ①入口は毎回「飲食店 / 生産者」の選択画面から始める(画面は保存しない)。
-  // 入力途中のデータ(登録済み出品・仕入れ案など)はlocalStorageから復元する。
+  // プロフィール(店舗名・住所等)と、入力途中のデータはlocalStorageから復元する。
+  // これにより初回登録さえ済ませれば、2回目以降はログイン状態を保ったまま使える。
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed.producers) && parsed.producers.length > 0) {
-        return { ...parsed, screen: 'home' }
+        return { restaurantProfile: null, producerProfile: null, ...parsed, screen: 'home' }
       }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
     screen: 'home',
+    restaurantProfile: null,
+    producerProfile: null,
     producers: buildDefaultProducers(),
     requestText: buildDefaultRequestText(),
     parsed: null,
@@ -54,6 +59,8 @@ function setState(patch) {
 function resetDemo() {
   state = {
     screen: state.screen,
+    restaurantProfile: state.restaurantProfile,
+    producerProfile: state.producerProfile,
     producers: buildDefaultProducers(),
     requestText: buildDefaultRequestText(),
     parsed: null,
@@ -143,6 +150,28 @@ function handleProducerDelete(id) {
   setState({ producers })
 }
 
+function handleRestaurantRegisterSubmit(form) {
+  const data = new FormData(form)
+  const restaurantProfile = {
+    storeName: String(data.get('storeName') || ''),
+    address: String(data.get('address') || ''),
+    station: String(data.get('station') || ''),
+    contactName: String(data.get('contactName') || '')
+  }
+  setState({ restaurantProfile, screen: 'restaurant' })
+}
+
+function handleProducerRegisterSubmit(form) {
+  const data = new FormData(form)
+  const producerProfile = {
+    farmName: String(data.get('farmName') || ''),
+    address: String(data.get('address') || ''),
+    station: String(data.get('station') || ''),
+    contactName: String(data.get('contactName') || '')
+  }
+  setState({ producerProfile, screen: 'producer' })
+}
+
 function handleAddProducer(form) {
   const data = new FormData(form)
   const id = `P${Date.now()}`
@@ -180,13 +209,24 @@ function render() {
       <button class="reset-btn" id="reset-demo">デモデータに戻す</button>
     </header>
     <main class="content">
-      ${onHome ? renderHome() : state.screen === 'restaurant' ? renderRestaurant() : renderProducer()}
+      ${renderScreen()}
     </main>
     <footer class="scope-note">
       このMVPが示すのは「仕入れ案の作成」までです。注文確定・在庫予約・決済・配送手配は対象外で、結果は常に「未確保」です。
     </footer>
   `
   attachEvents()
+}
+
+function renderScreen() {
+  switch (state.screen) {
+    case 'home': return renderHome()
+    case 'restaurant-register': return renderRestaurantRegister()
+    case 'producer-register': return renderProducerRegister()
+    case 'restaurant': return renderRestaurant()
+    case 'producer': return renderProducer()
+    default: return renderHome()
+  }
 }
 
 function renderHome() {
@@ -208,8 +248,54 @@ function renderHome() {
   `
 }
 
+function renderRestaurantRegister() {
+  const p = state.restaurantProfile || {}
+  const isEdit = !!state.restaurantProfile
+  return `
+    <section class="panel">
+      <h2>① 入口:店舗情報の登録${isEdit ? '(編集)' : ''}</h2>
+      <p class="hint">初回のみ入力します。次回以降はこの端末で自動的にログイン状態が保たれ、この画面は表示されません。</p>
+      <form id="restaurant-register-form" class="form-grid">
+        <label>店舗名<input name="storeName" type="text" required value="${escapeHtml(p.storeName || '')}" placeholder="例:小料理屋 みかみ" /></label>
+        <label>住所<input name="address" type="text" required value="${escapeHtml(p.address || '')}" placeholder="例:大阪市福島区..." /></label>
+        <label>最寄り駅<input name="station" type="text" value="${escapeHtml(p.station || '')}" placeholder="例:JR福島駅" /></label>
+        <label>担当者名<input name="contactName" type="text" value="${escapeHtml(p.contactName || '')}" placeholder="例:三上由香" /></label>
+      </form>
+      <div class="actions">
+        <button id="restaurant-register-submit" class="primary">登録して進む</button>
+        ${isEdit ? '<button id="cancel-register">キャンセル</button>' : ''}
+      </div>
+    </section>
+  `
+}
+
+function renderProducerRegister() {
+  const p = state.producerProfile || {}
+  const isEdit = !!state.producerProfile
+  return `
+    <section class="panel">
+      <h2>① 入口:農園情報の登録${isEdit ? '(編集)' : ''}</h2>
+      <p class="hint">初回のみ入力します。次回以降はこの端末で自動的にログイン状態が保たれ、この画面は表示されません。</p>
+      <form id="producer-register-form" class="form-grid">
+        <label>農園名<input name="farmName" type="text" required value="${escapeHtml(p.farmName || '')}" placeholder="例:森畠農園" /></label>
+        <label>住所<input name="address" type="text" required value="${escapeHtml(p.address || '')}" placeholder="例:大阪府豊能郡能勢町..." /></label>
+        <label>最寄り駅<input name="station" type="text" value="${escapeHtml(p.station || '')}" placeholder="例:能勢電鉄 山下駅" /></label>
+        <label>担当者名<input name="contactName" type="text" value="${escapeHtml(p.contactName || '')}" placeholder="例:森畠正輝" /></label>
+      </form>
+      <div class="actions">
+        <button id="producer-register-submit" class="primary">登録して進む</button>
+        ${isEdit ? '<button id="cancel-register">キャンセル</button>' : ''}
+      </div>
+    </section>
+  `
+}
+
 function renderRestaurant() {
   return `
+    <section class="panel profile-bar">
+      <span>ログイン中:<strong>${escapeHtml(state.restaurantProfile?.storeName || '')}</strong>${state.restaurantProfile?.contactName ? `(${escapeHtml(state.restaurantProfile.contactName)})` : ''}</span>
+      <button id="edit-restaurant-profile" class="link-btn">プロフィールを編集</button>
+    </section>
     <section class="panel">
       <h2>② 希望条件を入力</h2>
       <p class="hint">自然文のまま入力できます。(例:「明後日までに大阪近郊のトマトを10kg、多少形が悪くてもOK」)</p>
@@ -359,6 +445,10 @@ function renderSavedPlans() {
 
 function renderProducer() {
   return `
+    <section class="panel profile-bar">
+      <span>ログイン中:<strong>${escapeHtml(state.producerProfile?.farmName || '')}</strong>${state.producerProfile?.contactName ? `(${escapeHtml(state.producerProfile.contactName)})` : ''}</span>
+      <button id="edit-producer-profile" class="link-btn">プロフィールを編集</button>
+    </section>
     <section class="panel">
       <h2>② 出品内容を登録</h2>
       <form id="add-producer-form" class="form-grid">
@@ -415,10 +505,37 @@ function escapeHtml(s) {
 
 function attachEvents() {
   document.querySelectorAll('.entry-card').forEach(btn => {
-    btn.addEventListener('click', () => setState({ screen: btn.dataset.screen }))
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.screen
+      if (target === 'restaurant') {
+        setState({ screen: state.restaurantProfile ? 'restaurant' : 'restaurant-register' })
+      } else {
+        setState({ screen: state.producerProfile ? 'producer' : 'producer-register' })
+      }
+    })
   })
   document.getElementById('back-home')?.addEventListener('click', () => setState({ screen: 'home' }))
   document.getElementById('reset-demo')?.addEventListener('click', resetDemo)
+
+  document.getElementById('restaurant-register-submit')?.addEventListener('click', (e) => {
+    e.preventDefault()
+    const form = document.getElementById('restaurant-register-form')
+    if (!form.reportValidity()) return
+    handleRestaurantRegisterSubmit(form)
+  })
+  document.getElementById('producer-register-submit')?.addEventListener('click', (e) => {
+    e.preventDefault()
+    const form = document.getElementById('producer-register-form')
+    if (!form.reportValidity()) return
+    handleProducerRegisterSubmit(form)
+  })
+  document.getElementById('cancel-register')?.addEventListener('click', () => {
+    if (state.screen === 'restaurant-register') setState({ screen: 'restaurant' })
+    else if (state.screen === 'producer-register') setState({ screen: 'producer' })
+    else setState({ screen: 'home' })
+  })
+  document.getElementById('edit-restaurant-profile')?.addEventListener('click', () => setState({ screen: 'restaurant-register' }))
+  document.getElementById('edit-producer-profile')?.addEventListener('click', () => setState({ screen: 'producer-register' }))
 
   document.getElementById('parse-btn')?.addEventListener('click', handleParseClick)
   document.getElementById('compute-btn')?.addEventListener('click', () => {
