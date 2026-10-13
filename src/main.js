@@ -27,7 +27,7 @@ function loadState() {
     if (raw) {
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed.producers) && parsed.producers.length > 0) {
-        return { restaurantProfile: null, producerProfile: null, ...parsed, screen: 'home' }
+        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, ...parsed, screen: 'home' }
       }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
@@ -35,6 +35,8 @@ function loadState() {
     screen: 'home',
     restaurantProfile: null,
     producerProfile: null,
+    listingDraft: null,
+    listingStep: 2,
     producers: buildDefaultProducers(),
     requestText: buildDefaultRequestText(),
     parsed: null,
@@ -61,6 +63,8 @@ function resetDemo() {
     screen: state.screen,
     restaurantProfile: state.restaurantProfile,
     producerProfile: state.producerProfile,
+    listingDraft: null,
+    listingStep: 2,
     producers: buildDefaultProducers(),
     requestText: buildDefaultRequestText(),
     parsed: null,
@@ -172,20 +176,30 @@ function handleProducerRegisterSubmit(form) {
   setState({ producerProfile, screen: 'producer' })
 }
 
-function handleAddProducer(form) {
+function handleListingStepTwoNext(form) {
+  const data = new FormData(form)
+  const listingDraft = {
+    item: String(data.get('item') || ''),
+    availableDate: String(data.get('availableDate') || ''),
+    region: String(data.get('region') || DEMO_REGION)
+  }
+  setState({ listingDraft, listingStep: 3 })
+}
+
+function handleListingStepThreeSubmit(form) {
   const data = new FormData(form)
   const id = `P${Date.now()}`
   const producer = {
     id,
-    farmName: String(data.get('farmName') || '新規農家'),
-    item: String(data.get('item') || ''),
+    farmName: state.producerProfile?.farmName || '新規農家',
+    item: state.listingDraft.item,
+    availableDate: state.listingDraft.availableDate,
+    region: state.listingDraft.region,
     unit: String(data.get('unit') || 'kg'),
     quantity: Number(data.get('quantity') || 0),
     unitPrice: Number(data.get('unitPrice') || 0),
     isOffGrade: data.get('isOffGrade') === 'on',
     offGradeReason: String(data.get('offGradeReason') || ''),
-    availableDate: String(data.get('availableDate') || ''),
-    region: String(data.get('region') || DEMO_REGION),
     deliveryLocation: String(data.get('deliveryLocation') || ''),
     deliveryTime: String(data.get('deliveryTime') || ''),
     minQuantity: Number(data.get('minQuantity') || 1),
@@ -193,8 +207,7 @@ function handleAddProducer(form) {
     deliveryFee: Number(data.get('deliveryFee') || 0),
     available: true
   }
-  setState({ producers: [...state.producers, producer] })
-  form.reset()
+  setState({ producers: [...state.producers, producer], listingDraft: null, listingStep: 2 })
 }
 
 // ---------- 画面描画 ----------
@@ -443,17 +456,29 @@ function renderSavedPlans() {
   `
 }
 
-function renderProducer() {
+function renderListingStepTwo() {
+  const d = state.listingDraft || {}
   return `
-    <section class="panel profile-bar">
-      <span>ログイン中:<strong>${escapeHtml(state.producerProfile?.farmName || '')}</strong>${state.producerProfile?.contactName ? `(${escapeHtml(state.producerProfile.contactName)})` : ''}</span>
-      <button id="edit-producer-profile" class="link-btn">プロフィールを編集</button>
-    </section>
     <section class="panel">
-      <h2>② 出品内容を登録</h2>
-      <form id="add-producer-form" class="form-grid">
-        <label>農家名<input name="farmName" type="text" required placeholder="例:D農家" /></label>
-        <label>品目<input name="item" type="text" required placeholder="例:トマト" /></label>
+      <h2>② 出品内容を入力</h2>
+      <p class="hint">まず、何を・いつから・どのあたりで出せるかを選びます。</p>
+      <form id="listing-step2-form" class="form-grid">
+        <label>品目<input name="item" type="text" required value="${escapeHtml(d.item || '')}" placeholder="例:トマト" /></label>
+        <label>出荷可能日<input name="availableDate" type="date" required value="${d.availableDate || ''}" /></label>
+        <label>地域<input name="region" type="text" value="${escapeHtml(d.region ?? DEMO_REGION)}" placeholder="${DEMO_REGION}" /></label>
+      </form>
+      <div class="actions"><button id="listing-step2-next" class="primary">次へ(供給条件を入力)</button></div>
+    </section>
+  `
+}
+
+function renderListingStepThree() {
+  const d = state.listingDraft || {}
+  return `
+    <section class="panel">
+      <h2>③ 供給条件を登録</h2>
+      <p class="hint">品目:${escapeHtml(d.item)} / 出荷可能日:${escapeHtml(d.availableDate)} / 地域:${escapeHtml(d.region)}</p>
+      <form id="listing-step3-form" class="form-grid">
         <label>数量<input name="quantity" type="number" min="0" step="0.1" required /></label>
         <label>単位
           <select name="unit">
@@ -461,8 +486,6 @@ function renderProducer() {
           </select>
         </label>
         <label>単価(円)<input name="unitPrice" type="number" min="0" required /></label>
-        <label>出荷可能日<input name="availableDate" type="date" required /></label>
-        <label>地域<input name="region" type="text" placeholder="${DEMO_REGION}" /></label>
         <label>受渡場所<input name="deliveryLocation" type="text" placeholder="共通受渡拠点P" /></label>
         <label>受渡時間<input name="deliveryTime" type="text" placeholder="10:00〜11:00" /></label>
         <label>最低販売量<input name="minQuantity" type="number" min="0" step="0.1" value="1" /></label>
@@ -470,11 +493,24 @@ function renderProducer() {
         <label class="checkbox"><input name="isOffGrade" type="checkbox" /> 規格外(余剰・形不揃い等)</label>
         <label>規格外理由(任意)<input name="offGradeReason" type="text" placeholder="形の不揃い" /></label>
       </form>
-      <div class="actions"><button id="add-producer-btn" class="primary">登録する</button></div>
+      <div class="actions">
+        <button id="listing-step3-back">← ②に戻る</button>
+        <button id="listing-step3-submit" class="primary">登録する</button>
+      </div>
     </section>
+  `
+}
+
+function renderProducer() {
+  return `
+    <section class="panel profile-bar">
+      <span>ログイン中:<strong>${escapeHtml(state.producerProfile?.farmName || '')}</strong>${state.producerProfile?.contactName ? `(${escapeHtml(state.producerProfile.contactName)})` : ''}</span>
+      <button id="edit-producer-profile" class="link-btn">プロフィールを編集</button>
+    </section>
+    ${state.listingStep === 3 ? renderListingStepThree() : renderListingStepTwo()}
 
     <section class="panel">
-      <h2>④ 登録済みの出品(飲食店への提案に使われる)</h2>
+      <h2>④ 登録結果を確認(飲食店への提案に使われる)</h2>
       <table class="producer-table">
         <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>規格外</th><th>状態</th><th></th></tr></thead>
         <tbody>
@@ -556,11 +592,21 @@ function attachEvents() {
   document.getElementById('recompute-btn')?.addEventListener('click', handleRecomputeClick)
   document.getElementById('save-plan-btn')?.addEventListener('click', handleSavePlan)
 
-  document.getElementById('add-producer-btn')?.addEventListener('click', (e) => {
+  document.getElementById('listing-step2-next')?.addEventListener('click', (e) => {
     e.preventDefault()
-    const form = document.getElementById('add-producer-form')
+    const form = document.getElementById('listing-step2-form')
     if (!form.reportValidity()) return
-    handleAddProducer(form)
+    handleListingStepTwoNext(form)
+  })
+  document.getElementById('listing-step3-back')?.addEventListener('click', (e) => {
+    e.preventDefault()
+    setState({ listingStep: 2 })
+  })
+  document.getElementById('listing-step3-submit')?.addEventListener('click', (e) => {
+    e.preventDefault()
+    const form = document.getElementById('listing-step3-form')
+    if (!form.reportValidity()) return
+    handleListingStepThreeSubmit(form)
   })
   document.querySelectorAll('[data-qty-id]').forEach(input => {
     input.addEventListener('change', () => handleProducerQuantityChange(input.dataset.qtyId, input.value))
