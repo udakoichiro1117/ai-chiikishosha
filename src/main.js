@@ -48,7 +48,9 @@ function loadState() {
 
 function saveState() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    // flashMessageは一時的なUI通知なので保存対象から除く(再読み込み時に再表示されないように)。
+    const { flashMessage, ...persisted } = state
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted))
   } catch (e) { /* 保存できなくても画面表示は継続する */ }
 }
 
@@ -56,6 +58,13 @@ function setState(patch) {
   state = { ...state, ...patch }
   saveState()
   render()
+}
+
+let flashTimer = null
+function showFlash(message, extraPatch = {}) {
+  clearTimeout(flashTimer)
+  setState({ ...extraPatch, flashMessage: message })
+  flashTimer = setTimeout(() => setState({ flashMessage: null }), 2600)
 }
 
 function resetDemo() {
@@ -195,12 +204,13 @@ function handleProducerDelete(id) {
 
 function handleRestaurantRegisterSubmit(form) {
   const data = new FormData(form)
+  const wasEdit = !!state.restaurantProfile
   const restaurantProfile = {
     storeName: String(data.get('storeName') || ''),
     preferredRegion: String(data.get('preferredRegion') || ''),
     defaultAllowOffGrade: data.get('defaultAllowOffGrade') === 'on'
   }
-  setState({ restaurantProfile, screen: 'restaurant' })
+  showFlash(wasEdit ? '受取条件を保存しました' : '受取条件を設定しました', { restaurantProfile, screen: 'restaurant' })
 }
 
 function handleRestaurantRegisterSkip() {
@@ -214,13 +224,14 @@ function handleRestaurantRegisterSkip() {
 
 function handleProducerRegisterSubmit(form) {
   const data = new FormData(form)
+  const wasEdit = !!state.producerProfile
   const producerProfile = {
     farmName: String(data.get('farmName') || ''),
     address: String(data.get('address') || ''),
     station: String(data.get('station') || ''),
     contactName: String(data.get('contactName') || '')
   }
-  setState({ producerProfile, screen: 'producer' })
+  showFlash(wasEdit ? '農園情報を保存しました' : '農園情報を登録しました', { producerProfile, screen: 'producer' })
 }
 
 function handleListingStepTwoNext(form) {
@@ -268,6 +279,7 @@ function render() {
       ${onHome ? '' : '<button class="back-btn" id="back-home">← 選択画面に戻る</button>'}
       <button class="reset-btn" id="reset-demo">デモデータに戻す</button>
     </header>
+    ${state.flashMessage ? `<div class="flash-toast">✓ ${escapeHtml(state.flashMessage)}</div>` : ''}
     <main class="content">
       ${renderScreen()}
     </main>
@@ -324,8 +336,16 @@ function renderRestaurantRegister() {
   const isEdit = !!state.restaurantProfile
   return `
     <section class="panel">
-      <h2>① 受取条件を設定${isEdit ? '(編集)' : ''}</h2>
+      <h2>${isEdit ? '受取条件の編集' : '① 受取条件を設定'}</h2>
       <p class="hint">この画面の目的は店舗の登録ではなく、「欲しい食材・数量・受取条件を伝えること」の準備です。ここで決めた内容は次の②の初期値になり、自然文で省略しても自動的に補われます。あとからいつでも変更できます。</p>
+      ${isEdit ? `
+        <div class="current-settings">
+          <span class="current-settings-label">現在の設定</span>
+          <span>${escapeHtml(p.storeName || '(未設定)')}</span>
+          <span>受取希望エリア:${escapeHtml(p.preferredRegion || '指定なし')}</span>
+          <span>規格外:${p.defaultAllowOffGrade ? '基本許容' : '基本不可'}</span>
+        </div>
+      ` : ''}
       <form id="restaurant-register-form" class="form-grid">
         <label>店舗名<input name="storeName" type="text" required value="${escapeHtml(p.storeName || '')}" placeholder="例:小料理屋 みかみ" /></label>
         <label>受取希望エリア
@@ -340,8 +360,8 @@ function renderRestaurantRegister() {
         </label>
       </form>
       <div class="actions">
-        <button id="restaurant-register-submit" class="primary">設定して進む</button>
-        ${isEdit ? '<button id="cancel-register">キャンセル</button>' : '<button id="restaurant-register-skip">スキップ(あとで設定する)</button>'}
+        <button id="restaurant-register-submit" class="primary">${isEdit ? '保存する' : '設定して進む'}</button>
+        ${isEdit ? '<button id="cancel-register">変更せずに戻る</button>' : '<button id="restaurant-register-skip">スキップ(あとで設定する)</button>'}
       </div>
     </section>
   `
@@ -352,8 +372,16 @@ function renderProducerRegister() {
   const isEdit = !!state.producerProfile
   return `
     <section class="panel">
-      <h2>① 入口:農園情報の登録${isEdit ? '(編集)' : ''}</h2>
+      <h2>${isEdit ? '農園情報の編集' : '① 入口:農園情報の登録'}</h2>
       <p class="hint">初回のみ入力します。次回以降はこの端末で自動的にログイン状態が保たれ、この画面は表示されません。</p>
+      ${isEdit ? `
+        <div class="current-settings">
+          <span class="current-settings-label">現在の設定</span>
+          <span>${escapeHtml(p.farmName || '(未設定)')}</span>
+          <span>${escapeHtml(p.address || '住所未設定')}</span>
+          <span>${escapeHtml(p.station || '最寄り駅未設定')}</span>
+        </div>
+      ` : ''}
       <form id="producer-register-form" class="form-grid">
         <label>農園名<input name="farmName" type="text" required value="${escapeHtml(p.farmName || '')}" placeholder="例:森畠農園" /></label>
         <label>住所<input name="address" type="text" required value="${escapeHtml(p.address || '')}" placeholder="例:大阪府豊能郡能勢町..." /></label>
@@ -361,8 +389,8 @@ function renderProducerRegister() {
         <label>担当者名<input name="contactName" type="text" value="${escapeHtml(p.contactName || '')}" placeholder="例:森畠正輝" /></label>
       </form>
       <div class="actions">
-        <button id="producer-register-submit" class="primary">登録して進む</button>
-        ${isEdit ? '<button id="cancel-register">キャンセル</button>' : ''}
+        <button id="producer-register-submit" class="primary">${isEdit ? '保存する' : '登録して進む'}</button>
+        ${isEdit ? '<button id="cancel-register">変更せずに戻る</button>' : ''}
       </div>
     </section>
   `
@@ -378,7 +406,7 @@ function renderRestaurant() {
   return `
     <section class="panel profile-bar">
       <span>ログイン中:<strong>${escapeHtml(state.restaurantProfile?.storeName || '')}</strong>${prefsLine ? ` (${escapeHtml(prefsLine)})` : ''}</span>
-      <button id="edit-restaurant-profile" class="link-btn">受取条件を編集</button>
+      <button id="edit-restaurant-profile" class="edit-chip">✎ 受取条件を編集</button>
     </section>
     <section class="panel">
       <h2>② 欲しい食材・数量・受取条件を伝える</h2>
@@ -586,7 +614,7 @@ function renderProducer() {
   return `
     <section class="panel profile-bar">
       <span>ログイン中:<strong>${escapeHtml(state.producerProfile?.farmName || '')}</strong>${state.producerProfile?.contactName ? `(${escapeHtml(state.producerProfile.contactName)})` : ''}</span>
-      <button id="edit-producer-profile" class="link-btn">プロフィールを編集</button>
+      <button id="edit-producer-profile" class="edit-chip">✎ 農園情報を編集</button>
     </section>
     ${state.listingStep === 3 ? renderListingStepThree() : renderListingStepTwo()}
 
