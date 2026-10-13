@@ -158,20 +158,20 @@ function handleDemoFill() {
   setState({ requestText: buildDefaultRequestText(), parsed: null, result: null, resultSnapshot: null })
 }
 
-function handleQuickStart() {
-  const restaurantProfile = state.restaurantProfile || {
-    storeName: '小料理屋(デモ)',
-    preferredRegion: DEMO_REGION,
-    defaultAllowOffGrade: true
-  }
-  setState({
-    restaurantProfile,
-    requestText: buildDefaultRequestText(),
-    parsed: null,
-    result: null,
-    resultSnapshot: null,
-    screen: 'restaurant'
-  })
+function goToRestaurant() {
+  setState({ screen: state.restaurantProfile ? 'restaurant' : 'restaurant-register' })
+}
+
+function goToProducer() {
+  setState({ screen: state.producerProfile ? 'producer' : 'producer-register' })
+}
+
+function handleRestartRestaurant() {
+  setState({ requestText: buildDefaultRequestText(), parsed: null, result: null, resultSnapshot: null, screen: 'restaurant' })
+}
+
+function handleRestartProducer() {
+  setState({ listingDraft: null, listingStep: 2, screen: 'producer' })
 }
 
 function handleComputeClick() {
@@ -280,22 +280,50 @@ function handleListingStepThreeSubmit(form) {
 
 function render() {
   const app = document.getElementById('app')
-  const onHome = state.screen === 'home'
   app.innerHTML = `
-    <header class="topbar">
-      <div class="brand">AI地域商社 <span class="brand-sub">仕入れ案MVP</span></div>
-      ${onHome ? '' : '<button class="back-btn" id="back-home">← 選択画面に戻る</button>'}
-      <button class="reset-btn" id="reset-demo">デモデータに戻す</button>
-    </header>
-    ${state.flashMessage ? `<div class="flash-toast">✓ ${escapeHtml(state.flashMessage)}</div>` : ''}
-    <main class="content">
-      ${renderScreen()}
-    </main>
-    <footer class="scope-note">
-      このMVPが示すのは「仕入れ案の作成」までです。注文確定・在庫予約・決済・配送手配は対象外で、結果は常に「未確保」です。
-    </footer>
+    <div class="app-shell">
+      ${renderSidebar()}
+      <div class="shell-main">
+        ${state.flashMessage ? `<div class="flash-toast">✓ ${escapeHtml(state.flashMessage)}</div>` : ''}
+        <main class="content">
+          ${renderScreen()}
+        </main>
+        <footer class="scope-note">
+          このMVPが示すのは「仕入れ案の作成」までです。注文確定・在庫予約・決済・配送手配は対象外で、結果は常に「未確保」です。
+        </footer>
+      </div>
+    </div>
   `
   attachEvents()
+}
+
+function activeNavKey() {
+  if (state.screen === 'restaurant' || state.screen === 'restaurant-register') return 'restaurant'
+  if (state.screen === 'producer' || state.screen === 'producer-register') return 'producer'
+  if (state.screen === 'records') return 'records'
+  if (state.screen === 'settings') return 'settings'
+  return 'home'
+}
+
+function renderSidebar() {
+  const active = activeNavKey()
+  const item = (key, icon, label) => `
+    <button class="nav-item ${active === key ? 'active' : ''}" data-nav="${key}">
+      <span class="nav-icon">${icon}</span><span class="nav-label">${label}</span>
+    </button>
+  `
+  return `
+    <nav class="sidebar">
+      <div class="sidebar-brand"><span class="sidebar-brand-icon">🌱</span>AI地域商社</div>
+      <div class="sidebar-nav">
+        ${item('home', '🏠', 'ホーム')}
+        ${item('restaurant', '🛒', '仕入れ')}
+        ${item('producer', '🌱', '出品')}
+        ${item('records', '📖', '記録')}
+        ${item('settings', '⚙️', '設定')}
+      </div>
+    </nav>
+  `
 }
 
 function renderScreen() {
@@ -305,36 +333,90 @@ function renderScreen() {
     case 'producer-register': return renderProducerRegister()
     case 'restaurant': return renderRestaurant()
     case 'producer': return renderProducer()
+    case 'records': return renderRecords()
+    case 'settings': return renderSettings()
     default: return renderHome()
   }
 }
 
+function renderDraftCard({ icon, title, preview, resumeKey, restartKey }) {
+  return `
+    <div class="draft-card">
+      <div class="draft-card-body">
+        <span class="draft-icon">${icon}</span>
+        <div class="draft-text">
+          <div class="draft-title">${escapeHtml(title)}</div>
+          <div class="draft-preview">${escapeHtml(preview || '')}</div>
+        </div>
+      </div>
+      <div class="draft-actions">
+        <button class="draft-resume" data-nav="${resumeKey}">続きから</button>
+        <button class="draft-restart" data-restart="${restartKey}">最初から</button>
+      </div>
+    </div>
+  `
+}
+
 function renderHome() {
+  const hasAnyProfile = !!(state.restaurantProfile || state.producerProfile)
+  const greeting = hasAnyProfile ? 'おかえりなさい 😀' : 'はじめまして 👋'
+
+  const restaurantDraftActive = !!state.restaurantProfile
+  const producerDraftActive = !!state.producerProfile && !!state.listingDraft
+  const hasDrafts = restaurantDraftActive || producerDraftActive
+
   return `
     <section class="hero">
-      <div class="hero-eyebrow">AI地域商社</div>
-      <h1 class="hero-tagline">地域に分散する小さな供給を、<br class="br-mobile" />AIがひとつの具体的な仕入れ案へ変換する。</h1>
-    </section>
-
-    <section class="entry-choice">
-      <p class="hint">①入口:まず立場を選んでください。</p>
-      <div class="entry-cards">
-        <button class="entry-card restaurant-card" data-screen="restaurant">
-          <span class="entry-card-icon">食</span>
-          <span class="entry-card-label">飲食店側はこちら</span>
-          <span class="entry-card-desc">欲しい食材の条件をまとめて、最適な仕入れ案を作る</span>
-        </button>
-        <button class="entry-card producer-card" data-screen="producer">
-          <span class="entry-card-icon">産</span>
-          <span class="entry-card-label">生産者側はこちら</span>
-          <span class="entry-card-desc">能勢町の農家:余剰・規格外の野菜などを登録する</span>
-        </button>
+      <div class="hero-copy">
+        <p class="hero-greeting">${greeting}</p>
+        <h1 class="hero-heading">今日も、関西の<br class="br-mobile" />おいしいを見つけよう。</h1>
+        <p class="hero-sub">飲食店の「欲しい」と、農家さんの「売りたい」を、1つの仕入れ案にまとめます。</p>
+        <div class="step-flow">
+          <div class="step-item"><span class="step-icon">💬</span><span class="step-label">希望を入力</span></div>
+          <span class="step-dots"></span>
+          <div class="step-item"><span class="step-icon">✨</span><span class="step-label">AIが条件を整理</span></div>
+          <span class="step-dots"></span>
+          <div class="step-item"><span class="step-icon">🧑</span><span class="step-label">複数の農家を組み合わせ</span></div>
+          <span class="step-dots"></span>
+          <div class="step-item"><span class="step-icon">📄</span><span class="step-label">1つの仕入れ案</span></div>
+        </div>
+      </div>
+      <div class="hero-deco" aria-hidden="true">
+        <span class="hero-sun"></span>
+        <div class="hero-stall">🍅🍆🌿</div>
       </div>
     </section>
 
-    <section class="quickstart">
-      <p class="quickstart-label">はじめての方はこちら</p>
-      <button id="quickstart-btn" class="quickstart-btn">「明後日までに大阪近郊のトマトを10kg、形不揃いOK」を入力してみる</button>
+    ${hasDrafts ? `
+      <section class="draft-section">
+        <p class="draft-label">入力の続きから再開できます。</p>
+        ${restaurantDraftActive ? renderDraftCard({
+          icon: '✏️',
+          title: '仕入れの希望を入力中',
+          preview: state.requestText,
+          resumeKey: 'restaurant',
+          restartKey: 'restart-restaurant'
+        }) : ''}
+        ${producerDraftActive ? renderDraftCard({
+          icon: '✏️',
+          title: `出品を登録中(ステップ${state.listingStep === 3 ? 2 : 1}/2)`,
+          preview: `${state.producerProfile.farmName}・${state.listingDraft.item || ''}`,
+          resumeKey: 'producer',
+          restartKey: 'restart-producer'
+        }) : ''}
+      </section>
+    ` : ''}
+
+    <section class="cta-section">
+      <p class="cta-label">どちらで使いますか？</p>
+      <div class="cta-row">
+        <button class="cta-btn cta-primary" data-nav="restaurant">
+          <span class="cta-icon">🛒</span><span class="cta-text">仕入れ案を作る(飲食店)</span><span class="cta-arrow">→</span>
+        </button>
+        <button class="cta-btn cta-outline" data-nav="producer">
+          <span class="cta-icon">🌱</span><span class="cta-text">販売できるものを登録(生産者)</span><span class="cta-plus">＋</span>
+        </button>
+      </div>
     </section>
   `
 }
@@ -618,6 +700,30 @@ function renderListingStepThree() {
   `
 }
 
+function renderProducerTable() {
+  return `
+    <table class="producer-table">
+      <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>規格外</th><th>状態</th><th></th></tr></thead>
+      <tbody>
+        ${state.producers.map(p => `
+          <tr class="${p.available === false ? 'unavailable' : ''}">
+            <td>${escapeHtml(p.farmName)}</td>
+            <td>${escapeHtml(p.item)}</td>
+            <td><input type="number" min="0" step="0.1" value="${p.quantity}" data-qty-id="${p.id}" style="width:5em" />${escapeHtml(p.unit)}</td>
+            <td>${fmtNum(p.unitPrice)}円</td>
+            <td>${escapeHtml(p.availableDate || '')}</td>
+            <td>${p.isOffGrade ? `規格外(${escapeHtml(p.offGradeReason || '')})` : '通常品'}</td>
+            <td>${p.available === false ? '出荷不可' : '出荷可能'}</td>
+            <td>
+              <button data-toggle-id="${p.id}">${p.available === false ? '出荷再開' : '出荷停止'}</button>
+              <button data-delete-id="${p.id}">削除</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+  `
+}
+
 function renderProducer() {
   return `
     <section class="panel profile-bar">
@@ -628,26 +734,60 @@ function renderProducer() {
 
     <section class="panel">
       <h2>④ 登録結果を確認(飲食店への提案に使われる)</h2>
-      <table class="producer-table">
-        <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>規格外</th><th>状態</th><th></th></tr></thead>
-        <tbody>
-          ${state.producers.map(p => `
-            <tr class="${p.available === false ? 'unavailable' : ''}">
-              <td>${escapeHtml(p.farmName)}</td>
-              <td>${escapeHtml(p.item)}</td>
-              <td><input type="number" min="0" step="0.1" value="${p.quantity}" data-qty-id="${p.id}" style="width:5em" />${escapeHtml(p.unit)}</td>
-              <td>${fmtNum(p.unitPrice)}円</td>
-              <td>${escapeHtml(p.availableDate || '')}</td>
-              <td>${p.isOffGrade ? `規格外(${escapeHtml(p.offGradeReason || '')})` : '通常品'}</td>
-              <td>${p.available === false ? '出荷不可' : '出荷可能'}</td>
-              <td>
-                <button data-toggle-id="${p.id}">${p.available === false ? '出荷再開' : '出荷停止'}</button>
-                <button data-delete-id="${p.id}">削除</button>
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
+      ${renderProducerTable()}
       <p class="hint">⑤ 数量・公開状態を変えたら、飲食店タブで「在庫の最新状態で再計算」を押すと反映されます(在庫変動・欠品ケースのデモ)。</p>
+    </section>
+  `
+}
+
+function renderRecords() {
+  return `
+    <section class="panel">
+      <h2>記録</h2>
+      <p class="hint">保存した仕入れ案と、登録されている生産者の出品状況をまとめて確認できます。</p>
+    </section>
+    ${state.savedPlans.length ? renderSavedPlans() : '<section class="panel"><p class="hint">保存済みの仕入れ案はまだありません。②の「仕入れ案を作る」で成立案を保存するとここに表示されます。</p></section>'}
+    <section class="panel">
+      <h3>登録済みの生産者出品一覧</h3>
+      ${renderProducerTable()}
+    </section>
+  `
+}
+
+function renderSettings() {
+  const r = state.restaurantProfile
+  const p = state.producerProfile
+  return `
+    <section class="panel">
+      <h2>設定</h2>
+      <p class="hint">飲食店・生産者それぞれの条件の確認・編集と、デモデータのリセットができます。</p>
+    </section>
+    <section class="panel">
+      <h3>飲食店:受取条件</h3>
+      ${r ? `
+        <div class="current-settings">
+          <span>${escapeHtml(r.storeName)}</span>
+          <span>受取希望エリア:${escapeHtml(r.preferredRegion || '指定なし')}</span>
+          <span>規格外:${r.defaultAllowOffGrade ? '基本許容' : '基本不可'}</span>
+        </div>
+      ` : '<p class="hint">まだ設定されていません。</p>'}
+      <div class="actions"><button data-goto="restaurant-register" class="primary">${r ? '編集する' : '設定する'}</button></div>
+    </section>
+    <section class="panel">
+      <h3>生産者:農園情報</h3>
+      ${p ? `
+        <div class="current-settings">
+          <span>${escapeHtml(p.farmName)}</span>
+          <span>${escapeHtml(p.address || '住所未設定')}</span>
+          <span>${escapeHtml(p.station || '最寄り駅未設定')}</span>
+        </div>
+      ` : '<p class="hint">まだ登録されていません。</p>'}
+      <div class="actions"><button data-goto="producer-register" class="primary">${p ? '編集する' : '登録する'}</button></div>
+    </section>
+    <section class="panel">
+      <h3>デモ操作</h3>
+      <p class="hint">在庫・保存済み案などをすべて初期状態(A/B/C農家)に戻します。プロフィールは維持されます。</p>
+      <div class="actions"><button id="reset-demo">デモデータに戻す</button></div>
     </section>
   `
 }
@@ -657,18 +797,23 @@ function escapeHtml(s) {
 }
 
 function attachEvents() {
-  document.querySelectorAll('.entry-card').forEach(btn => {
+  document.querySelectorAll('[data-nav]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const target = btn.dataset.screen
-      if (target === 'restaurant') {
-        setState({ screen: state.restaurantProfile ? 'restaurant' : 'restaurant-register' })
-      } else {
-        setState({ screen: state.producerProfile ? 'producer' : 'producer-register' })
-      }
+      const key = btn.dataset.nav
+      if (key === 'restaurant') goToRestaurant()
+      else if (key === 'producer') goToProducer()
+      else setState({ screen: key })
     })
   })
-  document.getElementById('quickstart-btn')?.addEventListener('click', handleQuickStart)
-  document.getElementById('back-home')?.addEventListener('click', () => setState({ screen: 'home' }))
+  document.querySelectorAll('[data-goto]').forEach(btn => {
+    btn.addEventListener('click', () => setState({ screen: btn.dataset.goto }))
+  })
+  document.querySelectorAll('[data-restart]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.restart === 'restart-restaurant') handleRestartRestaurant()
+      else if (btn.dataset.restart === 'restart-producer') handleRestartProducer()
+    })
+  })
   document.getElementById('reset-demo')?.addEventListener('click', resetDemo)
 
   document.getElementById('restaurant-register-submit')?.addEventListener('click', (e) => {
