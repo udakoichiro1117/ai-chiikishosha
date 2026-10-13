@@ -108,6 +108,16 @@ function readRequestForm() {
   }
 }
 
+function handleQuickStart() {
+  const restaurantProfile = state.restaurantProfile || {
+    storeName: '小料理屋 みかみ(デモ)',
+    address: '大阪市福島区',
+    station: 'JR福島駅',
+    contactName: '三上由香'
+  }
+  setState({ restaurantProfile, request: buildDefaultRequest(), result: null, resultSnapshot: null, screen: 'restaurant' })
+}
+
 function handleComputeClick() {
   const request = readRequestForm()
   const result = computeAllocation(request, state.producers)
@@ -234,19 +244,30 @@ function renderScreen() {
 
 function renderHome() {
   return `
+    <section class="hero">
+      <div class="hero-eyebrow">AI地域商社</div>
+      <h1 class="hero-tagline">地域に分散する小さな供給を、<br class="br-mobile" />AIがひとつの具体的な仕入れ案へ変換する。</h1>
+    </section>
+
     <section class="entry-choice">
-      <h1 class="entry-title">どちらとして使いますか？</h1>
       <p class="hint">①入口:まず立場を選んでください。</p>
       <div class="entry-cards">
-        <button class="entry-card" data-screen="restaurant">
+        <button class="entry-card restaurant-card" data-screen="restaurant">
+          <span class="entry-card-icon">食</span>
           <span class="entry-card-label">飲食店側はこちら</span>
-          <span class="entry-card-desc">欲しい食材を伝えて、仕入れ案を作る</span>
+          <span class="entry-card-desc">大阪・福島の小料理屋「みかみ」三上さん:欲しい野菜を選んでまとめて仕入れ案を作る</span>
         </button>
-        <button class="entry-card" data-screen="producer">
+        <button class="entry-card producer-card" data-screen="producer">
+          <span class="entry-card-icon">産</span>
           <span class="entry-card-label">生産者側はこちら</span>
-          <span class="entry-card-desc">販売できるものを登録する</span>
+          <span class="entry-card-desc">能勢町の農家:余剰・規格外の野菜などを登録する</span>
         </button>
       </div>
+    </section>
+
+    <section class="quickstart">
+      <p class="quickstart-label">はじめての方はこちら</p>
+      <button id="quickstart-btn" class="quickstart-btn">デモ条件(トマト10kg・明後日・大阪近郊・形不揃いOK)で試してみる</button>
     </section>
   `
 }
@@ -533,6 +554,7 @@ function attachEvents() {
       }
     })
   })
+  document.getElementById('quickstart-btn')?.addEventListener('click', handleQuickStart)
   document.getElementById('back-home')?.addEventListener('click', () => setState({ screen: 'home' }))
   document.getElementById('reset-demo')?.addEventListener('click', resetDemo)
 
