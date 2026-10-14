@@ -407,6 +407,13 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bord
 .producer-table input[type=number] { padding: 4px; }
 tr.unavailable { opacity: 0.5; }
 
+.table-scroll { overflow-x: auto; }
+.producer-table { min-width: 640px; }
+.table-actions { display: flex; flex-direction: column; gap: 8px; min-width: 110px; }
+.table-btn { width: 100%; }
+.table-btn-danger { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.table-btn-danger:hover { background: var(--warn); color: #fff; }
+
 .advanced-settings {
   margin-top: 14px;
   border: 1px solid var(--border);

@@ -211,6 +211,9 @@ function handleProducerAvailabilityToggle(id) {
 }
 
 function handleProducerDelete(id) {
+  const target = state.producers.find(p => p.id === id)
+  const label = target ? `${target.farmName}・${target.item}(${fmtNum(target.quantity)}${target.unit})` : 'この出品'
+  if (!window.confirm(`${label}を削除します。元に戻せません。よろしいですか？`)) return
   const producers = state.producers.filter(p => p.id !== id)
   setState({ producers })
 }
@@ -278,7 +281,11 @@ function handleListingStepThreeSubmit(form) {
     deliveryFee: Number(data.get('deliveryFee') || 0),
     available: true
   }
-  setState({ producers: [...state.producers, producer], listingDraft: null, listingStep: 2 })
+  showFlash(`出品を登録しました(${producer.item} ${fmtNum(producer.quantity)}${producer.unit})`, {
+    producers: [...state.producers, producer],
+    listingDraft: null,
+    listingStep: 2
+  })
 }
 
 // ---------- 画面描画 ----------
@@ -715,25 +722,27 @@ function renderListingStepThree() {
 
 function renderProducerTable() {
   return `
-    <table class="producer-table">
-      <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>規格外</th><th>状態</th><th></th></tr></thead>
-      <tbody>
-        ${state.producers.map(p => `
-          <tr class="${p.available === false ? 'unavailable' : ''}">
-            <td>${escapeHtml(p.farmName)}</td>
-            <td>${escapeHtml(p.item)}</td>
-            <td><input type="number" min="0" step="0.1" value="${p.quantity}" data-qty-id="${p.id}" style="width:5em" />${escapeHtml(p.unit)}</td>
-            <td>${fmtNum(p.unitPrice)}円</td>
-            <td>${escapeHtml(p.availableDate || '')}</td>
-            <td>${p.isOffGrade ? `規格外(${escapeHtml(p.offGradeReason || '')})` : '通常品'}</td>
-            <td>${p.available === false ? '出荷不可' : '出荷可能'}</td>
-            <td>
-              <button data-toggle-id="${p.id}">${p.available === false ? '出荷再開' : '出荷停止'}</button>
-              <button data-delete-id="${p.id}">削除</button>
-            </td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
+    <div class="table-scroll">
+      <table class="producer-table">
+        <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>規格外</th><th>状態</th><th></th></tr></thead>
+        <tbody>
+          ${state.producers.map(p => `
+            <tr class="${p.available === false ? 'unavailable' : ''}">
+              <td>${escapeHtml(p.farmName)}</td>
+              <td>${escapeHtml(p.item)}</td>
+              <td><input type="number" min="0" step="0.1" value="${p.quantity}" data-qty-id="${p.id}" style="width:5em" />${escapeHtml(p.unit)}</td>
+              <td>${fmtNum(p.unitPrice)}円</td>
+              <td>${escapeHtml(p.availableDate || '')}</td>
+              <td>${p.isOffGrade ? `規格外(${escapeHtml(p.offGradeReason || '')})` : '通常品'}</td>
+              <td>${p.available === false ? '出荷不可' : '出荷可能'}</td>
+              <td class="table-actions">
+                <button data-toggle-id="${p.id}" class="table-btn">${p.available === false ? '出荷再開' : '出荷停止'}</button>
+                <button data-delete-id="${p.id}" class="table-btn table-btn-danger">削除</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
   `
 }
 
