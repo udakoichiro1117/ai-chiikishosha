@@ -395,6 +395,53 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bord
 .producer-table input[type=number] { padding: 4px; }
 tr.unavailable { opacity: 0.5; }
 
+.advanced-settings {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.advanced-settings summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.advanced-settings[open] summary { margin-bottom: 4px; }
+
+/* ---- 生産者向け「シニア配慮モード」 ----
+   研究ノート(jimoseri/research_notes)の通り、生産者側は高齢の利用者が多いと
+   想定し、文字・ボタン・入力欄を大きくし、情報量を絞る。飲食店側には適用しない。 */
+.senior-ui { font-size: 1.15rem; line-height: 1.8; }
+.senior-ui h2 { font-size: 1.4rem; }
+.senior-ui h3 { font-size: 1.2rem; }
+.senior-ui .hint { font-size: 1rem; }
+.senior-ui .panel { padding: 24px 26px; }
+.senior-ui input[type=text],
+.senior-ui input[type=number],
+.senior-ui input[type=date],
+.senior-ui select,
+.senior-ui textarea {
+  font-size: 1.1rem;
+  padding: 14px 12px;
+  min-height: 48px;
+}
+.senior-ui .form-grid label { font-size: 1rem; }
+.senior-ui .form-grid label.checkbox input { width: 22px; height: 22px; }
+.senior-ui button {
+  font-size: 1.1rem;
+  padding: 16px 26px;
+  min-height: 56px;
+  border-radius: 10px;
+}
+.senior-ui .edit-chip { font-size: 1rem; padding: 12px 20px; min-height: 0; }
+.senior-ui .advanced-settings summary { font-size: 1rem; }
+.senior-ui .producer-table { font-size: 1.05rem; }
+.senior-ui .producer-table th,
+.senior-ui .producer-table td { padding: 14px 10px; }
+.senior-ui .producer-table input[type=number] { font-size: 1.05rem; padding: 10px; width: 4.5em; min-height: 0; }
+.senior-ui .producer-table button { font-size: 1rem; padding: 10px 16px; min-height: 0; margin: 2px 0; }
+.senior-ui .current-settings { font-size: 0.95rem; }
+
 .scope-note {
   max-width: 760px;
   margin: 0 auto 30px;

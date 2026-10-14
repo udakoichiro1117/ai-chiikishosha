@@ -1,5 +1,5 @@
 import './style.css'
-import { buildDefaultProducers, buildDefaultRequestText, DEMO_REGION, VEGETABLE_OPTIONS, REGION_BROAD_OPTIONS, OSAKA_CITY_OPTIONS } from './data.js'
+import { buildDefaultProducers, buildDefaultRequestText, DEMO_REGION, DEMO_LOCATION, DEMO_TIME, VEGETABLE_OPTIONS, REGION_BROAD_OPTIONS, OSAKA_CITY_OPTIONS } from './data.js'
 import { parseRequestText, offGradeMentioned } from './parser.js'
 import { computeAllocation, describeInventoryDiff } from './matching.js'
 
@@ -326,13 +326,16 @@ function renderSidebar() {
   `
 }
 
+// 生産者側は年齢層が比較的高いと想定し(研究ノート参照:ポケットマルシェ登録生産者の
+// 平均年齢48歳、上昇傾向)、文字・ボタンを大きくし、見える項目数を絞ったUIにする。
+// 飲食店側(三上さん想定・38歳)は通常サイズのまま。
 function renderScreen() {
   switch (state.screen) {
     case 'home': return renderHome()
     case 'restaurant-register': return renderRestaurantRegister()
-    case 'producer-register': return renderProducerRegister()
+    case 'producer-register': return `<div class="senior-ui">${renderProducerRegister()}</div>`
     case 'restaurant': return renderRestaurant()
-    case 'producer': return renderProducer()
+    case 'producer': return `<div class="senior-ui">${renderProducer()}</div>`
     case 'records': return renderRecords()
     case 'settings': return renderSettings()
     default: return renderHome()
@@ -685,13 +688,18 @@ function renderListingStepThree() {
           </select>
         </label>
         <label>単価(円)<input name="unitPrice" type="number" min="0" required /></label>
-        <label>受渡場所<input name="deliveryLocation" type="text" placeholder="共通受渡拠点P" /></label>
-        <label>受渡時間<input name="deliveryTime" type="text" placeholder="10:00〜11:00" /></label>
-        <label>最低販売量<input name="minQuantity" type="number" min="0" step="0.1" value="1" /></label>
-        <label>販売刻み<input name="incrementStep" type="number" min="0.1" step="0.1" value="1" /></label>
         <label class="checkbox"><input name="isOffGrade" type="checkbox" /> 規格外(余剰・形不揃い等)</label>
         <label>規格外理由(任意)<input name="offGradeReason" type="text" placeholder="形の不揃い" /></label>
       </form>
+      <details class="advanced-settings">
+        <summary>受渡し等の詳しい設定(通常は変更しなくて大丈夫です)</summary>
+        <div class="form-grid" style="margin-top:12px">
+          <label>受渡場所<input form="listing-step3-form" name="deliveryLocation" type="text" value="${escapeHtml(DEMO_LOCATION)}" /></label>
+          <label>受渡時間<input form="listing-step3-form" name="deliveryTime" type="text" value="${escapeHtml(DEMO_TIME)}" /></label>
+          <label>最低販売量<input form="listing-step3-form" name="minQuantity" type="number" min="0" step="0.1" value="1" /></label>
+          <label>販売刻み<input form="listing-step3-form" name="incrementStep" type="number" min="0.1" step="0.1" value="1" /></label>
+        </div>
+      </details>
       <div class="actions">
         <button id="listing-step3-back">← ②に戻る</button>
         <button id="listing-step3-submit" class="primary">登録する</button>
