@@ -60,6 +60,8 @@ JSON以外の文字は出力しないでください。`
     const parsed = JSON.parse(raw)
     res.status(200).json({ rawText: text, ...parsed })
   } catch (e) {
+    // Vercelのダッシュボード/`vercel logs`で原因を追えるように、失敗時は必ずサーバー側へ記録する。
+    console.error(`[api/parse] gemini call failed (model=${model}):`, e)
     res.status(502).json({ error: 'ai parse failed', detail: String(e) })
   }
 }
