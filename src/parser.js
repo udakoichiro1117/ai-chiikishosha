@@ -76,6 +76,13 @@ function extractPriceLimit(text) {
   return m ? Number(m[1]) : null
 }
 
+// 生産者側は「予算の上限」ではなく「単価そのもの」を話す(例:「1キロ800円」)。
+// 「以内/まで」を伴わない、最初の「数字+円」を単価として扱う。
+function extractUnitPrice(text) {
+  const m = text.match(/(\d+)\s*円(?!\s*(以内|まで))/)
+  return m ? Number(m[1]) : null
+}
+
 function extractItem(text, knownItems) {
   const found = knownItems.find(name => name && text.includes(name))
   return found || null
@@ -101,4 +108,36 @@ export function parseRequestText(text, knownItems, today = new Date()) {
     allowOffGrade: extractOffGrade(trimmed),
     priceLimit: extractPriceLimit(trimmed)
   }
+}
+
+/**
+ * 生産者側(出品)用。「トマトが5キロ採れた。1キロ800円で明日出せる。大阪近郊で。」
+ * のような自然文から、出品に必要な項目をまとめて抽出する。
+ * @param {string} text 自然文
+ * @param {string[]} knownItems 既存の品目名一覧(照合用)
+ * @param {Date} today 実行時点の日付
+ */
+export function parseListingText(text, knownItems, today = new Date()) {
+  const trimmed = (text || '').trim()
+  const { quantity, unit } = extractQuantity(trimmed)
+  const { date } = extractDate(trimmed, today)
+  return {
+    rawText: trimmed,
+    item: extractItem(trimmed, knownItems),
+    quantity,
+    unit,
+    availableDate: date,
+    region: extractRegion(trimmed),
+    unitPrice: extractUnitPrice(trimmed),
+    isOffGrade: extractOffGrade(trimmed),
+    offGradeReason: extractOffGrade(trimmed) ? offGradeReasonHint(trimmed) : ''
+  }
+}
+
+function offGradeReasonHint(text) {
+  if (text.includes('形')) return '形の不揃い'
+  if (text.includes('サイズ') || text.includes('大きさ')) return 'サイズの不揃い'
+  if (text.includes('傷') || text.includes('変色')) return '傷・変色'
+  if (text.includes('余剰') || text.includes('余って')) return '余剰'
+  return ''
 }

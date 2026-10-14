@@ -1,6 +1,6 @@
 import './style.css'
 import { buildDefaultProducers, buildDefaultRequestText, DEMO_REGION, DEMO_LOCATION, DEMO_TIME, VEGETABLE_OPTIONS, REGION_BROAD_OPTIONS, OSAKA_CITY_OPTIONS } from './data.js'
-import { parseRequestText, offGradeMentioned } from './parser.js'
+import { parseRequestText, parseListingText, offGradeMentioned } from './parser.js'
 import { computeAllocation, describeInventoryDiff } from './matching.js'
 
 const STORAGE_KEY = 'ai-chiikishosha-state-v1'
@@ -15,6 +15,9 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  result: any|null,
  *  resultSnapshot: any[]|null,
  *  savedPlans: any[],
+ *  listingDraft: {item:string,availableDate:string,region:string,quantity?:number|null,unit?:string,unitPrice?:number|null,isOffGrade?:boolean,offGradeReason?:string,source?:string}|null,
+ *  listingStep: 2|3,
+ *  listingText: string,
  *  lastRole: 'restaurant'|'producer'|null,
  *  largeText: boolean
  * }} */
@@ -29,7 +32,7 @@ function loadState() {
     if (raw) {
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed.producers) && parsed.producers.length > 0) {
-        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, lastRole: null, largeText: false, ...parsed, screen: 'home' }
+        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', lastRole: null, largeText: false, ...parsed, screen: 'home' }
       }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
@@ -39,6 +42,7 @@ function loadState() {
     producerProfile: null,
     listingDraft: null,
     listingStep: 2,
+    listingText: '',
     lastRole: null,
     largeText: false,
     producers: buildDefaultProducers(),
@@ -83,6 +87,7 @@ function resetDemo() {
     largeText: state.largeText,
     listingDraft: null,
     listingStep: 2,
+    listingText: '',
     producers: buildDefaultProducers(),
     requestText: buildDefaultRequestText(),
     parsed: null,
@@ -136,14 +141,14 @@ function fmtNum(n) {
 
 // ---------- イベントハンドラ ----------
 
-async function tryAiParse(text, knownItems) {
+async function tryAiParseGeneric(text, knownItems, mode, fallbackFn) {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 4000)
     const res = await fetch('/api/parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, knownItems }),
+      body: JSON.stringify({ text, knownItems, mode }),
       signal: controller.signal
     })
     clearTimeout(timeout)
@@ -152,8 +157,42 @@ async function tryAiParse(text, knownItems) {
     if (!json || typeof json !== 'object') throw new Error('invalid json')
     return { ...json, source: 'ai' }
   } catch (e) {
-    return { ...parseRequestText(text, knownItems), source: 'rule' }
+    return { ...fallbackFn(text, knownItems), source: 'rule' }
   }
+}
+
+function tryAiParse(text, knownItems) {
+  return tryAiParseGeneric(text, knownItems, 'request', parseRequestText)
+}
+
+function tryAiParseListing(text, knownItems) {
+  return tryAiParseGeneric(text, knownItems, 'listing', parseListingText)
+}
+
+// 音声入力(Web Speech API、ブラウザ標準・追加サーバー不要)。
+// 対応していないブラウザ(iOS Safariの一部等)では、その旨をメッセージ欄に表示し、
+// 手入力(自然文/構造化フォーム)にそのまま切り替えられるようにする。
+function startVoiceInput(textareaId, msgId) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  const msgEl = document.getElementById(msgId)
+  if (!SR) {
+    if (msgEl) msgEl.textContent = 'お使いのブラウザは音声入力に対応していません。文章を直接入力してください。'
+    return
+  }
+  const recognition = new SR()
+  recognition.lang = 'ja-JP'
+  recognition.interimResults = false
+  recognition.maxAlternatives = 1
+  if (msgEl) msgEl.textContent = '聞き取り中…話してください'
+  recognition.onresult = (e) => {
+    const text = e.results[0][0].transcript
+    const ta = document.getElementById(textareaId)
+    if (ta) ta.value = (ta.value ? ta.value + ' ' : '') + text
+    if (msgEl) msgEl.textContent = ''
+  }
+  recognition.onerror = () => { if (msgEl) msgEl.textContent = '聞き取れませんでした。もう一度お試しください。' }
+  recognition.onend = () => { if (msgEl && msgEl.textContent === '聞き取り中…話してください') msgEl.textContent = '' }
+  try { recognition.start() } catch (e) { if (msgEl) msgEl.textContent = '音声入力を開始できませんでした。' }
 }
 
 function readParsedForm() {
@@ -199,7 +238,7 @@ function handleRestartRestaurant() {
 }
 
 function handleRestartProducer() {
-  setState({ listingDraft: null, listingStep: 2, screen: 'producer' })
+  setState({ listingDraft: null, listingStep: 2, listingText: '', screen: 'producer' })
 }
 
 function handleComputeClick() {
@@ -284,6 +323,24 @@ function handleListingStepTwoNext(form) {
     item: String(data.get('item') || ''),
     availableDate: String(data.get('availableDate') || ''),
     region: String(data.get('region') || DEMO_REGION)
+  }
+  setState({ listingDraft, listingStep: 3 })
+}
+
+async function handleListingParseClick() {
+  const text = document.getElementById('listing-text').value
+  setState({ listingText: text })
+  const extracted = await tryAiParseListing(text, itemOptions())
+  const listingDraft = {
+    item: extracted.item || '',
+    availableDate: extracted.availableDate || '',
+    region: extracted.region || DEMO_REGION,
+    quantity: extracted.quantity ?? null,
+    unit: extracted.unit || 'kg',
+    unitPrice: extracted.unitPrice ?? null,
+    isOffGrade: !!extracted.isOffGrade,
+    offGradeReason: extracted.offGradeReason || '',
+    source: extracted.source
   }
   setState({ listingDraft, listingStep: 3 })
 }
@@ -562,8 +619,10 @@ function renderRestaurant() {
       <p class="hint">自然文のまま入力できます。(例:「明後日までに大阪近郊のトマトを10kg、多少形が悪くてもOK」)</p>
       <div class="actions demo-fill-row">
         <button id="demo-fill-btn" class="ghost-btn">【デモ用】明後日までに大阪近郊のトマトを10kg、形不揃いOK を入力</button>
+        <button type="button" id="request-voice-btn" class="ghost-btn">🎤 音声で入力する</button>
       </div>
       <textarea id="request-text" rows="3">${escapeHtml(state.requestText)}</textarea>
+      <p id="request-voice-msg" class="zip-msg"></p>
       <div class="actions">
         <button id="parse-btn" class="primary">AIで読み取る</button>
       </div>
@@ -719,7 +778,19 @@ function renderListingStepTwo() {
   return `
     <section class="panel">
       <h2>② 出品内容を入力</h2>
-      <p class="hint">まず、何を・いつから・どのあたりで出せるかを選びます。</p>
+      <p class="hint">話しかけるか文章で書くと、品目・数量・単価・出荷可能日などをAIがまとめて読み取ります。(例:「トマトが5キロ採れた。1キロ800円で明日出せる。大阪近郊で。」)</p>
+      <div class="actions demo-fill-row">
+        <button type="button" id="listing-voice-btn" class="ghost-btn">🎤 音声で入力する</button>
+      </div>
+      <textarea id="listing-text" rows="3">${escapeHtml(state.listingText || '')}</textarea>
+      <p id="listing-voice-msg" class="zip-msg"></p>
+      <div class="actions">
+        <button type="button" id="listing-parse-btn" class="primary">AIで読み取る</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>または、直接入力する</h3>
       <form id="listing-step2-form" class="form-grid">
         <label>品目<input name="item" type="text" required value="${escapeHtml(d.item || '')}" placeholder="例:トマト" /></label>
         <label>出荷可能日<input name="availableDate" type="date" required value="${d.availableDate || ''}" /></label>
@@ -732,20 +803,24 @@ function renderListingStepTwo() {
 
 function renderListingStepThree() {
   const d = state.listingDraft || {}
+  const readModeNote = d.source
+    ? `<p class="hint">読み取り方式:${d.source === 'ai' ? 'AI(Gemini)' : 'ルールベース'}。内容を確認し、必要なら修正してください。</p>`
+    : ''
   return `
     <section class="panel">
       <h2>③ 供給条件を登録</h2>
       <p class="hint">品目:${escapeHtml(d.item)} / 出荷可能日:${escapeHtml(d.availableDate)} / 地域:${escapeHtml(d.region)}</p>
+      ${readModeNote}
       <form id="listing-step3-form" class="form-grid">
-        <label>数量<input name="quantity" type="number" min="0" step="0.1" required /></label>
+        <label>数量<input name="quantity" type="number" min="0" step="0.1" required value="${d.quantity ?? ''}" /></label>
         <label>単位
           <select name="unit">
-            ${['kg', '個', '本', '袋', '房'].map(u => `<option value="${u}">${u}</option>`).join('')}
+            ${['kg', '個', '本', '袋', '房'].map(u => `<option value="${u}" ${d.unit === u ? 'selected' : ''}>${u}</option>`).join('')}
           </select>
         </label>
-        <label>単価(円)<input name="unitPrice" type="number" min="0" required /></label>
-        <label class="checkbox"><input name="isOffGrade" type="checkbox" /> 規格外(余剰・形不揃い等)</label>
-        <label>規格外理由(任意)<input name="offGradeReason" type="text" placeholder="形の不揃い" /></label>
+        <label>単価(円)<input name="unitPrice" type="number" min="0" required value="${d.unitPrice ?? ''}" /></label>
+        <label class="checkbox"><input name="isOffGrade" type="checkbox" ${d.isOffGrade ? 'checked' : ''} /> 規格外(余剰・形不揃い等)</label>
+        <label>規格外理由(任意)<input name="offGradeReason" type="text" placeholder="形の不揃い" value="${escapeHtml(d.offGradeReason || '')}" /></label>
       </form>
       <details class="advanced-settings">
         <summary>受渡し等の詳しい設定(通常は変更しなくて大丈夫です)</summary>
@@ -985,9 +1060,13 @@ function attachEvents() {
   document.getElementById('edit-producer-profile')?.addEventListener('click', () => setState({ screen: 'producer-register' }))
 
   document.getElementById('parse-btn')?.addEventListener('click', handleParseClick)
+  document.getElementById('request-voice-btn')?.addEventListener('click', () => startVoiceInput('request-text', 'request-voice-msg'))
   document.getElementById('compute-btn')?.addEventListener('click', handleComputeClick)
   document.getElementById('recompute-btn')?.addEventListener('click', handleRecomputeClick)
   document.getElementById('save-plan-btn')?.addEventListener('click', handleSavePlan)
+
+  document.getElementById('listing-voice-btn')?.addEventListener('click', () => startVoiceInput('listing-text', 'listing-voice-msg'))
+  document.getElementById('listing-parse-btn')?.addEventListener('click', handleListingParseClick)
 
   document.getElementById('listing-step2-next')?.addEventListener('click', (e) => {
     e.preventDefault()

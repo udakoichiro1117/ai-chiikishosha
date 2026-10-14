@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     return
   }
 
-  const { text, knownItems } = req.body || {}
+  const { text, knownItems, mode } = req.body || {}
   if (typeof text !== 'string' || text.length === 0 || text.length > 500) {
     res.status(400).json({ error: 'invalid text' })
     return
@@ -23,12 +23,30 @@ export default async function handler(req, res) {
   const items = Array.isArray(knownItems) ? knownItems.slice(0, 50) : []
 
   // Geminiは「今日」を知らないため、日本時間の基準日を明示しないと
-  // 「明日」「明後日」等の相対表現をneededDateに変換できずnullになる。
+  // 「明日」「明後日」等の相対表現を絶対日付に変換できずnullになる。
   const todayJst = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit'
   }).format(new Date())
 
-  const prompt = `次の日本語の自然文から、飲食店の仕入れ希望条件をJSONで抽出してください。
+  // mode:'listing' は生産者の出品登録(自然文・音声入力共通)、既定は飲食店の仕入れ希望。
+  const prompt = mode === 'listing'
+    ? `次の日本語の自然文から、生産者の出品内容をJSONで抽出してください。
+今日の日付(日本時間)は ${todayJst} です。「明日」「明後日」「今週中」のような相対的な日付表現は、この日付を基準にYYYY-MM-DD形式の絶対日付に変換してください。
+入力: "${text}"
+既知の品目候補: ${items.join('、') || 'なし'}
+出力は次のキーのみを持つJSONオブジェクトにしてください。値が読み取れない場合は null にしてください(allowOffGradeに相当するisOffGradeのみboolean、他はnull可)。
+{
+  "item": string|null,
+  "quantity": number|null,
+  "unit": "kg"|"個"|"本"|"袋"|"房"|null,
+  "availableDate": "YYYY-MM-DD"|null,
+  "region": string|null,
+  "unitPrice": number|null,
+  "isOffGrade": boolean,
+  "offGradeReason": string|null
+}
+JSON以外の文字は出力しないでください。`
+    : `次の日本語の自然文から、飲食店の仕入れ希望条件をJSONで抽出してください。
 今日の日付(日本時間)は ${todayJst} です。「明日」「明後日」「今週中」のような相対的な日付表現は、この日付を基準にYYYY-MM-DD形式の絶対日付に変換してください。
 入力: "${text}"
 既知の品目候補: ${items.join('、') || 'なし'}
@@ -46,7 +64,7 @@ JSON以外の文字は出力しないでください。`
 
   // モデル名は世代交代が早いため決め打ちにせず、環境変数GEMINI_MODELで上書きできるようにする。
   // 未設定の場合のみ既定値を使う(Google AI Studioの現行モデル一覧で要確認)。
-  const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
+  const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite'
 
   try {
     const r = await fetch(
