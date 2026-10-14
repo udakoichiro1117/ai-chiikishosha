@@ -7,8 +7,8 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
 
 /** @type {{
  *  screen: 'home'|'restaurant'|'producer'|'restaurant-register'|'producer-register',
- *  restaurantProfile: {storeName:string,preferredRegion:string,defaultAllowOffGrade:boolean}|null,
- *  producerProfile: {farmName:string,address:string,station:string,contactName:string}|null,
+ *  restaurantProfile: {storeName:string,postalCode:string,address:string,preferredRegion:string,defaultAllowOffGrade:boolean}|null,
+ *  producerProfile: {farmName:string,postalCode:string,address:string,station:string,contactName:string}|null,
  *  producers: any[],
  *  requestText: string,
  *  parsed: {item:string,quantity:number,unit:string,neededDate:string,region:string,allowOffGrade:boolean,priceLimit:number|null,source:string}|null,
@@ -104,6 +104,25 @@ function renderRegionOptions(selected) {
     <optgroup label="広域の目安">${REGION_BROAD_OPTIONS.map(opt).join('')}</optgroup>
     <optgroup label="大阪府の市">${OSAKA_CITY_OPTIONS.map(opt).join('')}</optgroup>
   `
+}
+
+// 郵便番号→住所変換(zipcloud、APIキー不要・ブラウザから直接呼び出し可能)。
+// https://zipcloud.ibsnet.co.jp/doc/api
+async function lookupAddressByZip(rawZip) {
+  const zip = String(rawZip || '').replace(/[^0-9]/g, '')
+  if (zip.length !== 7) return { ok: false, message: '郵便番号は7桁の数字で入力してください' }
+  try {
+    const res = await fetch(`https://zipcloud.ibsnet.co.jp/api/search?zipcode=${zip}`)
+    if (!res.ok) throw new Error(`http ${res.status}`)
+    const json = await res.json()
+    if (json.status !== 200 || !json.results || json.results.length === 0) {
+      return { ok: false, message: '該当する住所が見つかりませんでした' }
+    }
+    const r = json.results[0]
+    return { ok: true, address: `${r.address1}${r.address2}${r.address3}` }
+  } catch (e) {
+    return { ok: false, message: '住所の取得に失敗しました(通信エラー)' }
+  }
 }
 
 function fmtNum(n) {
@@ -223,6 +242,8 @@ function handleRestaurantRegisterSubmit(form) {
   const wasEdit = !!state.restaurantProfile
   const restaurantProfile = {
     storeName: String(data.get('storeName') || ''),
+    postalCode: String(data.get('postalCode') || ''),
+    address: String(data.get('address') || ''),
     preferredRegion: String(data.get('preferredRegion') || ''),
     defaultAllowOffGrade: data.get('defaultAllowOffGrade') === 'on'
   }
@@ -232,6 +253,8 @@ function handleRestaurantRegisterSubmit(form) {
 function handleRestaurantRegisterSkip() {
   const restaurantProfile = state.restaurantProfile || {
     storeName: '未設定の店舗',
+    postalCode: '',
+    address: '',
     preferredRegion: '',
     defaultAllowOffGrade: false
   }
@@ -243,6 +266,7 @@ function handleProducerRegisterSubmit(form) {
   const wasEdit = !!state.producerProfile
   const producerProfile = {
     farmName: String(data.get('farmName') || ''),
+    postalCode: String(data.get('postalCode') || ''),
     address: String(data.get('address') || ''),
     station: String(data.get('station') || ''),
     contactName: String(data.get('contactName') || '')
@@ -447,12 +471,21 @@ function renderRestaurantRegister() {
         <div class="current-settings">
           <span class="current-settings-label">現在の設定</span>
           <span>${escapeHtml(p.storeName || '(未設定)')}</span>
+          <span>${escapeHtml(p.address || '住所未設定')}</span>
           <span>受取希望エリア:${escapeHtml(p.preferredRegion || '指定なし')}</span>
           <span>規格外:${p.defaultAllowOffGrade ? '基本許容' : '基本不可'}</span>
         </div>
       ` : ''}
       <form id="restaurant-register-form" class="form-grid">
         <label>店舗名<input name="storeName" type="text" required value="${escapeHtml(p.storeName || '')}" placeholder="例:小料理屋 みかみ" /></label>
+        <label>郵便番号
+          <div class="zip-row">
+            <input id="restaurant-postal" name="postalCode" type="text" inputmode="numeric" value="${escapeHtml(p.postalCode || '')}" placeholder="例:530-0001" />
+            <button type="button" class="zip-lookup-btn" data-zip-input="restaurant-postal" data-address-input="restaurant-address" data-msg="restaurant-zip-msg">住所を自動入力</button>
+          </div>
+          <span id="restaurant-zip-msg" class="zip-msg"></span>
+        </label>
+        <label>住所<input id="restaurant-address" name="address" type="text" value="${escapeHtml(p.address || '')}" placeholder="例:大阪市北区..." /></label>
         <label>受取希望エリア
           <select name="preferredRegion">
             <option value="" ${!p.preferredRegion ? 'selected' : ''}>指定なし</option>
@@ -489,7 +522,14 @@ function renderProducerRegister() {
       ` : ''}
       <form id="producer-register-form" class="form-grid">
         <label>農園名<input name="farmName" type="text" required value="${escapeHtml(p.farmName || '')}" placeholder="例:森畠農園" /></label>
-        <label>住所<input name="address" type="text" required value="${escapeHtml(p.address || '')}" placeholder="例:大阪府豊能郡能勢町..." /></label>
+        <label>郵便番号
+          <div class="zip-row">
+            <input id="producer-postal" name="postalCode" type="text" inputmode="numeric" value="${escapeHtml(p.postalCode || '')}" placeholder="例:563-0131" />
+            <button type="button" class="zip-lookup-btn" data-zip-input="producer-postal" data-address-input="producer-address" data-msg="producer-zip-msg">住所を自動入力</button>
+          </div>
+          <span id="producer-zip-msg" class="zip-msg"></span>
+        </label>
+        <label>住所<input id="producer-address" name="address" type="text" required value="${escapeHtml(p.address || '')}" placeholder="例:大阪府豊能郡能勢町..." /></label>
         <label>最寄り駅<input name="station" type="text" value="${escapeHtml(p.station || '')}" placeholder="例:能勢電鉄 山下駅" /></label>
         <label>担当者名<input name="contactName" type="text" value="${escapeHtml(p.contactName || '')}" placeholder="例:森畠正輝" /></label>
       </form>
@@ -822,6 +862,7 @@ function renderSettings() {
         ${r ? `
           <div class="current-settings">
             <span>${escapeHtml(r.storeName)}</span>
+            <span>${escapeHtml(r.address || '住所未設定')}</span>
             <span>受取希望エリア:${escapeHtml(r.preferredRegion || '指定なし')}</span>
             <span>規格外:${r.defaultAllowOffGrade ? '基本許容' : '基本不可'}</span>
           </div>
@@ -871,6 +912,26 @@ function attachEvents() {
   })
   document.querySelectorAll('[data-settings-role]').forEach(btn => {
     btn.addEventListener('click', () => setState({ lastRole: btn.dataset.settingsRole }))
+  })
+  document.querySelectorAll('.zip-lookup-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const zipInput = document.getElementById(btn.dataset.zipInput)
+      const addressInput = document.getElementById(btn.dataset.addressInput)
+      const msgEl = document.getElementById(btn.dataset.msg)
+      if (!zipInput || !addressInput) return
+      btn.disabled = true
+      if (msgEl) { msgEl.textContent = '検索中…'; msgEl.className = 'zip-msg' }
+      const result = await lookupAddressByZip(zipInput.value)
+      btn.disabled = false
+      if (result.ok) {
+        addressInput.value = result.address
+        addressInput.focus()
+        if (msgEl) { msgEl.textContent = ''; msgEl.className = 'zip-msg' }
+      } else if (msgEl) {
+        msgEl.textContent = result.message
+        msgEl.className = 'zip-msg zip-msg-error'
+      }
+    })
   })
   document.querySelectorAll('[data-restart]').forEach(btn => {
     btn.addEventListener('click', () => {
