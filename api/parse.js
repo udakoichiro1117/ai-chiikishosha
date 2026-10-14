@@ -22,7 +22,14 @@ export default async function handler(req, res) {
   }
   const items = Array.isArray(knownItems) ? knownItems.slice(0, 50) : []
 
+  // Geminiは「今日」を知らないため、日本時間の基準日を明示しないと
+  // 「明日」「明後日」等の相対表現をneededDateに変換できずnullになる。
+  const todayJst = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date())
+
   const prompt = `次の日本語の自然文から、飲食店の仕入れ希望条件をJSONで抽出してください。
+今日の日付(日本時間)は ${todayJst} です。「明日」「明後日」「今週中」のような相対的な日付表現は、この日付を基準にYYYY-MM-DD形式の絶対日付に変換してください。
 入力: "${text}"
 既知の品目候補: ${items.join('、') || 'なし'}
 出力は次のキーのみを持つJSONオブジェクトにしてください。値が読み取れない場合は null にしてください。
