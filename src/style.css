@@ -427,39 +427,40 @@ tr.unavailable { opacity: 0.5; }
 .role-restaurant { --role-accent: var(--restaurant-accent); --role-soft: var(--restaurant-soft); }
 .role-producer { --role-accent: var(--producer-accent); --role-soft: var(--producer-soft); }
 
-/* ---- 生産者向け「シニア配慮モード」 ----
-   研究ノート(jimoseri/research_notes)の通り、生産者側は高齢の利用者が多いと
-   想定し、文字・ボタン・入力欄を大きくし、情報量を絞る。飲食店側には適用しない。 */
-.senior-ui { font-size: 1.15rem; line-height: 1.8; }
-.senior-ui h2 { font-size: 1.4rem; }
-.senior-ui h3 { font-size: 1.2rem; }
-.senior-ui .hint { font-size: 1rem; }
-.senior-ui .panel { padding: 24px 26px; }
-.senior-ui input[type=text],
-.senior-ui input[type=number],
-.senior-ui input[type=date],
-.senior-ui select,
-.senior-ui textarea {
+/* ---- 文字を大きくする(設定画面のトグルでON/OFF、全画面共通) ----
+   以前は生産者側にだけ自動適用していたが、役割をまたいで急にサイズが
+   変わる違和感があったため廃止。今は.app-shellに付くユーザー操作の
+   トグルにして、どちらの役割でも同じ文字サイズになるようにした。 */
+.large-text { font-size: 1.15rem; line-height: 1.8; }
+.large-text h2 { font-size: 1.4rem; }
+.large-text h3 { font-size: 1.2rem; }
+.large-text .hint { font-size: 1rem; }
+.large-text .panel { padding: 24px 26px; }
+.large-text input[type=text],
+.large-text input[type=number],
+.large-text input[type=date],
+.large-text select,
+.large-text textarea {
   font-size: 1.1rem;
   padding: 14px 12px;
   min-height: 48px;
 }
-.senior-ui .form-grid label { font-size: 1rem; }
-.senior-ui .form-grid label.checkbox input { width: 22px; height: 22px; }
-.senior-ui button {
+.large-text .form-grid label { font-size: 1rem; }
+.large-text .form-grid label.checkbox input { width: 22px; height: 22px; }
+.large-text button {
   font-size: 1.1rem;
   padding: 16px 26px;
   min-height: 56px;
   border-radius: 10px;
 }
-.senior-ui .edit-chip { font-size: 1rem; padding: 12px 20px; min-height: 0; }
-.senior-ui .advanced-settings summary { font-size: 1rem; }
-.senior-ui .producer-table { font-size: 1.05rem; }
-.senior-ui .producer-table th,
-.senior-ui .producer-table td { padding: 14px 10px; }
-.senior-ui .producer-table input[type=number] { font-size: 1.05rem; padding: 10px; width: 4.5em; min-height: 0; }
-.senior-ui .producer-table button { font-size: 1rem; padding: 10px 16px; min-height: 0; margin: 2px 0; }
-.senior-ui .current-settings { font-size: 0.95rem; }
+.large-text .edit-chip { font-size: 1rem; padding: 12px 20px; min-height: 0; }
+.large-text .advanced-settings summary { font-size: 1rem; }
+.large-text .producer-table { font-size: 1.05rem; }
+.large-text .producer-table th,
+.large-text .producer-table td { padding: 14px 10px; }
+.large-text .producer-table input[type=number] { font-size: 1.05rem; padding: 10px; width: 4.5em; min-height: 0; }
+.large-text .producer-table button { font-size: 1rem; padding: 10px 16px; min-height: 0; margin: 2px 0; }
+.large-text .current-settings { font-size: 0.95rem; }
 
 .scope-note {
   max-width: 760px;

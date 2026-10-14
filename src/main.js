@@ -14,7 +14,9 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  parsed: {item:string,quantity:number,unit:string,neededDate:string,region:string,allowOffGrade:boolean,priceLimit:number|null,source:string}|null,
  *  result: any|null,
  *  resultSnapshot: any[]|null,
- *  savedPlans: any[]
+ *  savedPlans: any[],
+ *  lastRole: 'restaurant'|'producer'|null,
+ *  largeText: boolean
  * }} */
 let state = loadState()
 
@@ -27,7 +29,7 @@ function loadState() {
     if (raw) {
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed.producers) && parsed.producers.length > 0) {
-        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, lastRole: null, ...parsed, screen: 'home' }
+        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, lastRole: null, largeText: false, ...parsed, screen: 'home' }
       }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
@@ -38,6 +40,7 @@ function loadState() {
     listingDraft: null,
     listingStep: 2,
     lastRole: null,
+    largeText: false,
     producers: buildDefaultProducers(),
     requestText: buildDefaultRequestText(),
     parsed: null,
@@ -77,6 +80,7 @@ function resetDemo() {
     restaurantProfile: state.restaurantProfile,
     producerProfile: state.producerProfile,
     lastRole: state.lastRole,
+    largeText: state.largeText,
     listingDraft: null,
     listingStep: 2,
     producers: buildDefaultProducers(),
@@ -317,7 +321,7 @@ function handleListingStepThreeSubmit(form) {
 function render() {
   const app = document.getElementById('app')
   app.innerHTML = `
-    <div class="app-shell">
+    <div class="app-shell ${state.largeText ? 'large-text' : ''}">
       ${renderSidebar()}
       <div class="shell-main">
         ${state.flashMessage ? `<div class="flash-toast">✓ ${escapeHtml(state.flashMessage)}</div>` : ''}
@@ -369,9 +373,9 @@ function renderScreen() {
   switch (state.screen) {
     case 'home': return renderHome()
     case 'restaurant-register': return `<div class="role-restaurant">${renderRestaurantRegister()}</div>`
-    case 'producer-register': return `<div class="senior-ui role-producer">${renderProducerRegister()}</div>`
+    case 'producer-register': return `<div class="role-producer">${renderProducerRegister()}</div>`
     case 'restaurant': return `<div class="role-restaurant">${renderRestaurant()}</div>`
-    case 'producer': return `<div class="senior-ui role-producer">${renderProducer()}</div>`
+    case 'producer': return `<div class="role-producer">${renderProducer()}</div>`
     case 'records': return renderRecords()
     case 'settings': return renderSettings()
     default: return renderHome()
@@ -826,6 +830,19 @@ function renderSettingsSwitch() {
   `
 }
 
+function renderDisplaySettingsCard() {
+  const on = !!state.largeText
+  return `
+    <section class="panel">
+      <h3>表示設定</h3>
+      <p class="hint">飲食店・生産者どちらの画面にも共通で適用される、文字・ボタンの大きさの設定です。</p>
+      <div class="actions">
+        <button id="toggle-large-text" class="${on ? 'primary' : ''}">${on ? '✓ 文字を大きく表示中(標準に戻す)' : '文字を大きくする'}</button>
+      </div>
+    </section>
+  `
+}
+
 function renderDemoResetCard() {
   return `
     <section class="panel">
@@ -846,6 +863,7 @@ function renderSettings() {
         <p class="hint">「仕入れ」または「出品」を一度開くと、その役割の設定だけがここに表示されます。先に下から選ぶこともできます。</p>
         ${renderSettingsSwitch()}
       </section>
+      ${renderDisplaySettingsCard()}
       ${renderDemoResetCard()}
     `
   }
@@ -869,6 +887,7 @@ function renderSettings() {
         ` : '<p class="hint">まだ設定されていません。</p>'}
         <div class="actions"><button data-goto="restaurant-register" class="primary">${r ? '編集する' : '設定する'}</button></div>
       </section>
+      ${renderDisplaySettingsCard()}
       ${renderDemoResetCard()}
     `
   }
@@ -890,6 +909,7 @@ function renderSettings() {
       ` : '<p class="hint">まだ登録されていません。</p>'}
       <div class="actions"><button data-goto="producer-register" class="primary">${p ? '編集する' : '登録する'}</button></div>
     </section>
+    ${renderDisplaySettingsCard()}
     ${renderDemoResetCard()}
   `
 }
@@ -940,6 +960,7 @@ function attachEvents() {
     })
   })
   document.getElementById('reset-demo')?.addEventListener('click', resetDemo)
+  document.getElementById('toggle-large-text')?.addEventListener('click', () => setState({ largeText: !state.largeText }))
 
   document.getElementById('restaurant-register-submit')?.addEventListener('click', (e) => {
     e.preventDefault()
