@@ -300,6 +300,18 @@ body {
 }
 .hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 10px; }
 
+.settings-switch { display: flex; gap: 8px; flex-wrap: wrap; }
+.settings-switch-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  padding: 7px 16px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.settings-switch-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
 textarea, input[type=text], input[type=number], input[type=date], select {
   width: 100%;
   padding: 8px 10px;

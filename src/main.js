@@ -27,7 +27,7 @@ function loadState() {
     if (raw) {
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed.producers) && parsed.producers.length > 0) {
-        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, ...parsed, screen: 'home' }
+        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, lastRole: null, ...parsed, screen: 'home' }
       }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
@@ -37,6 +37,7 @@ function loadState() {
     producerProfile: null,
     listingDraft: null,
     listingStep: 2,
+    lastRole: null,
     producers: buildDefaultProducers(),
     requestText: buildDefaultRequestText(),
     parsed: null,
@@ -56,6 +57,9 @@ function saveState() {
 
 function setState(patch) {
   state = { ...state, ...patch }
+  // 直近どちらの役割を開いたかを覚えておき、設定画面をその役割だけに絞り込む。
+  if (patch.screen === 'restaurant' || patch.screen === 'restaurant-register') state.lastRole = 'restaurant'
+  else if (patch.screen === 'producer' || patch.screen === 'producer-register') state.lastRole = 'producer'
   saveState()
   render()
 }
@@ -72,6 +76,7 @@ function resetDemo() {
     screen: state.screen,
     restaurantProfile: state.restaurantProfile,
     producerProfile: state.producerProfile,
+    lastRole: state.lastRole,
     listingDraft: null,
     listingStep: 2,
     producers: buildDefaultProducers(),
@@ -762,27 +767,70 @@ function renderRecords() {
   `
 }
 
+function renderSettingsSwitch() {
+  const role = state.lastRole
+  return `
+    <div class="settings-switch">
+      <button class="settings-switch-btn ${role === 'restaurant' ? 'active' : ''}" data-settings-role="restaurant">飲食店の設定</button>
+      <button class="settings-switch-btn ${role === 'producer' ? 'active' : ''}" data-settings-role="producer">生産者の設定</button>
+    </div>
+  `
+}
+
+function renderDemoResetCard() {
+  return `
+    <section class="panel">
+      <h3>デモ操作</h3>
+      <p class="hint">在庫・保存済み案などをすべて初期状態(A/B/C農家)に戻します。プロフィールは維持されます。</p>
+      <div class="actions"><button id="reset-demo">デモデータに戻す</button></div>
+    </section>
+  `
+}
+
 function renderSettings() {
-  const r = state.restaurantProfile
+  const role = state.lastRole
+
+  if (!role) {
+    return `
+      <section class="panel">
+        <h2>設定</h2>
+        <p class="hint">「仕入れ」または「出品」を一度開くと、その役割の設定だけがここに表示されます。先に下から選ぶこともできます。</p>
+        ${renderSettingsSwitch()}
+      </section>
+      ${renderDemoResetCard()}
+    `
+  }
+
+  if (role === 'restaurant') {
+    const r = state.restaurantProfile
+    return `
+      <section class="panel">
+        <h2>設定(飲食店)</h2>
+        ${renderSettingsSwitch()}
+      </section>
+      <section class="panel">
+        <h3>受取条件</h3>
+        ${r ? `
+          <div class="current-settings">
+            <span>${escapeHtml(r.storeName)}</span>
+            <span>受取希望エリア:${escapeHtml(r.preferredRegion || '指定なし')}</span>
+            <span>規格外:${r.defaultAllowOffGrade ? '基本許容' : '基本不可'}</span>
+          </div>
+        ` : '<p class="hint">まだ設定されていません。</p>'}
+        <div class="actions"><button data-goto="restaurant-register" class="primary">${r ? '編集する' : '設定する'}</button></div>
+      </section>
+      ${renderDemoResetCard()}
+    `
+  }
+
   const p = state.producerProfile
   return `
     <section class="panel">
-      <h2>設定</h2>
-      <p class="hint">飲食店・生産者それぞれの条件の確認・編集と、デモデータのリセットができます。</p>
+      <h2>設定(生産者)</h2>
+      ${renderSettingsSwitch()}
     </section>
     <section class="panel">
-      <h3>飲食店:受取条件</h3>
-      ${r ? `
-        <div class="current-settings">
-          <span>${escapeHtml(r.storeName)}</span>
-          <span>受取希望エリア:${escapeHtml(r.preferredRegion || '指定なし')}</span>
-          <span>規格外:${r.defaultAllowOffGrade ? '基本許容' : '基本不可'}</span>
-        </div>
-      ` : '<p class="hint">まだ設定されていません。</p>'}
-      <div class="actions"><button data-goto="restaurant-register" class="primary">${r ? '編集する' : '設定する'}</button></div>
-    </section>
-    <section class="panel">
-      <h3>生産者:農園情報</h3>
+      <h3>農園情報</h3>
       ${p ? `
         <div class="current-settings">
           <span>${escapeHtml(p.farmName)}</span>
@@ -792,11 +840,7 @@ function renderSettings() {
       ` : '<p class="hint">まだ登録されていません。</p>'}
       <div class="actions"><button data-goto="producer-register" class="primary">${p ? '編集する' : '登録する'}</button></div>
     </section>
-    <section class="panel">
-      <h3>デモ操作</h3>
-      <p class="hint">在庫・保存済み案などをすべて初期状態(A/B/C農家)に戻します。プロフィールは維持されます。</p>
-      <div class="actions"><button id="reset-demo">デモデータに戻す</button></div>
-    </section>
+    ${renderDemoResetCard()}
   `
 }
 
@@ -815,6 +859,9 @@ function attachEvents() {
   })
   document.querySelectorAll('[data-goto]').forEach(btn => {
     btn.addEventListener('click', () => setState({ screen: btn.dataset.goto }))
+  })
+  document.querySelectorAll('[data-settings-role]').forEach(btn => {
+    btn.addEventListener('click', () => setState({ lastRole: btn.dataset.settingsRole }))
   })
   document.querySelectorAll('[data-restart]').forEach(btn => {
     btn.addEventListener('click', () => {
