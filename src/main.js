@@ -368,19 +368,19 @@ function renderSidebar() {
 function renderScreen() {
   switch (state.screen) {
     case 'home': return renderHome()
-    case 'restaurant-register': return renderRestaurantRegister()
-    case 'producer-register': return `<div class="senior-ui">${renderProducerRegister()}</div>`
-    case 'restaurant': return renderRestaurant()
-    case 'producer': return `<div class="senior-ui">${renderProducer()}</div>`
+    case 'restaurant-register': return `<div class="role-restaurant">${renderRestaurantRegister()}</div>`
+    case 'producer-register': return `<div class="senior-ui role-producer">${renderProducerRegister()}</div>`
+    case 'restaurant': return `<div class="role-restaurant">${renderRestaurant()}</div>`
+    case 'producer': return `<div class="senior-ui role-producer">${renderProducer()}</div>`
     case 'records': return renderRecords()
     case 'settings': return renderSettings()
     default: return renderHome()
   }
 }
 
-function renderDraftCard({ icon, title, preview, resumeKey, restartKey }) {
+function renderDraftCard({ icon, title, preview, resumeKey, restartKey, role }) {
   return `
-    <div class="draft-card">
+    <div class="draft-card role-${role}">
       <div class="draft-card-body">
         <span class="draft-icon">${icon}</span>
         <div class="draft-text">
@@ -418,14 +418,16 @@ function renderHome() {
           title: '仕入れの希望を入力中',
           preview: state.requestText,
           resumeKey: 'restaurant',
-          restartKey: 'restart-restaurant'
+          restartKey: 'restart-restaurant',
+          role: 'restaurant'
         }) : ''}
         ${producerDraftActive ? renderDraftCard({
           icon: '✏️',
           title: `出品を登録中(ステップ${state.listingStep === 3 ? 2 : 1}/2)`,
           preview: `${state.producerProfile.farmName}・${state.listingDraft.item || ''}`,
           resumeKey: 'producer',
-          restartKey: 'restart-producer'
+          restartKey: 'restart-producer',
+          role: 'producer'
         }) : ''}
       </section>
     ` : ''}

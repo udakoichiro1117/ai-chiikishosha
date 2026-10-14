@@ -84,9 +84,9 @@ body {
   margin: 10px auto 0;
   max-width: 600px;
   padding: 10px 16px;
-  background: var(--producer-soft);
-  color: var(--producer-accent);
-  border: 1px solid var(--producer-accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
   border-radius: 8px;
   font-size: 0.85rem;
   text-align: center;
@@ -176,7 +176,7 @@ body {
 .draft-preview { font-size: 0.82rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
 .draft-actions { display: flex; gap: 8px; flex: none; }
 .draft-resume {
-  background: var(--accent-soft); color: var(--accent); border: none;
+  background: var(--role-soft, var(--accent-soft)); color: var(--role-accent, var(--accent)); border: none;
   border-radius: 999px; padding: 7px 14px; font-size: 0.82rem; cursor: pointer;
 }
 .draft-restart {
@@ -201,18 +201,18 @@ body {
 }
 .cta-icon { font-size: 1.2rem; }
 .cta-text { flex: 1; text-align: left; }
-.cta-primary { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
+.cta-primary { background: var(--restaurant-accent); color: #fff; border: 1px solid var(--restaurant-accent); }
 .cta-primary:hover { opacity: 0.92; }
-.cta-outline { background: var(--surface); color: var(--fg); border: 1px solid var(--border); }
-.cta-outline:hover { border-color: var(--producer-accent); color: var(--producer-accent); }
+.cta-outline { background: var(--producer-soft); color: var(--producer-accent); border: 1px solid var(--producer-accent); }
+.cta-outline:hover { background: var(--producer-accent); color: #fff; }
 
 .demo-fill-row { margin-top: 0; margin-bottom: 12px; }
 .ghost-btn {
   padding: 8px 14px;
-  border: 1px dashed var(--accent);
+  border: 1px dashed var(--role-accent, var(--accent));
   border-radius: 8px;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--role-soft, var(--accent-soft));
+  color: var(--role-accent, var(--accent));
   font-size: 0.82rem;
   cursor: pointer;
   width: 100%;
@@ -235,12 +235,12 @@ body {
   gap: 10px;
   padding: 10px 16px;
   font-size: 0.85rem;
-  background: var(--accent-soft);
+  background: var(--role-soft, var(--accent-soft));
 }
 .link-btn {
   border: none;
   background: none;
-  color: var(--accent);
+  color: var(--role-accent, var(--accent));
   text-decoration: underline;
   cursor: pointer;
   padding: 0;
@@ -248,16 +248,16 @@ body {
 }
 .edit-chip {
   flex: none;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--role-accent, var(--accent));
   background: var(--surface);
-  color: var(--accent);
+  color: var(--role-accent, var(--accent));
   border-radius: 999px;
   padding: 5px 12px;
   font-size: 0.78rem;
   cursor: pointer;
   white-space: nowrap;
 }
-.edit-chip:hover { background: var(--accent); color: #fff; }
+.edit-chip:hover { background: var(--role-accent, var(--accent)); color: #fff; }
 
 .current-settings {
   display: flex;
@@ -290,7 +290,10 @@ body {
   font-size: 0.85rem;
   cursor: pointer;
 }
-.settings-switch-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.settings-switch-btn[data-settings-role="restaurant"] { border-color: var(--restaurant-accent); color: var(--restaurant-accent); }
+.settings-switch-btn[data-settings-role="restaurant"].active { background: var(--restaurant-accent); color: #fff; }
+.settings-switch-btn[data-settings-role="producer"] { border-color: var(--producer-accent); color: var(--producer-accent); }
+.settings-switch-btn[data-settings-role="producer"].active { background: var(--producer-accent); color: #fff; }
 
 textarea, input[type=text], input[type=number], input[type=date], select {
   width: 100%;
@@ -325,7 +328,7 @@ button {
   cursor: pointer;
   font-size: 0.9rem;
 }
-button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+button.primary { background: var(--role-accent, var(--accent)); color: #fff; border-color: var(--role-accent, var(--accent)); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .warn { color: var(--warn); background: var(--warn-soft); padding: 8px 12px; border-radius: 6px; }
@@ -336,7 +339,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-weight: 600;
   margin: 0 0 12px;
   padding: 10px 14px;
-  background: var(--surface-2, var(--accent-soft));
+  background: var(--role-soft, var(--accent-soft));
   border-radius: 8px;
 }
 
@@ -344,7 +347,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   display: flex;
   flex-wrap: wrap;
   gap: 8px 20px;
-  background: var(--accent-soft);
+  background: var(--role-soft, var(--accent-soft));
   padding: 10px 14px;
   border-radius: 6px;
   margin-bottom: 14px;
@@ -370,14 +373,15 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .alloc-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .alloc-farm { font-weight: 700; font-size: 0.95rem; }
-.alloc-amount { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
+.alloc-amount { font-size: 1.4rem; font-weight: 700; color: var(--role-accent, var(--accent)); }
 .alloc-unit { font-size: 0.85rem; font-weight: 400; color: var(--muted); margin-left: 2px; }
 .alloc-price { font-size: 0.9rem; }
 .alloc-unitprice { color: var(--muted); font-size: 0.78rem; margin-left: 4px; }
-.alloc-total { background: var(--accent-soft); border-color: var(--accent); }
+.alloc-total { background: var(--role-soft, var(--accent-soft)); border-color: var(--role-accent, var(--accent)); }
+/* バッジは役割色ではなく状態の意味(通常/規格外)で色分けする */
 .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
-.badge-normal { background: var(--producer-soft); color: var(--producer-accent); }
-.badge-offgrade { background: var(--restaurant-soft); color: var(--restaurant-accent); }
+.badge-normal { background: var(--accent-soft); color: var(--accent); }
+.badge-offgrade { background: var(--warn-soft); color: var(--warn); }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
@@ -412,6 +416,16 @@ tr.unavailable { opacity: 0.5; }
   color: var(--muted);
 }
 .advanced-settings[open] summary { margin-bottom: 4px; }
+
+/* ---- 役割カラー ----
+   飲食店=オレンジ(--restaurant-accent)/生産者=緑(--producer-accent)を
+   役割固有の識別色として一貫させる。--role-accent/--role-softは
+   .role-restaurant/.role-producerの中でのみ上書きされ、外側(ホーム・
+   記録・設定など役割に属さない画面)では--accent/--accent-softにフォール
+   バックする。状態の意味(成功・警告など)はこれらとは別に--accent系/
+   --warn系を使い、役割色と混同しない。 */
+.role-restaurant { --role-accent: var(--restaurant-accent); --role-soft: var(--restaurant-soft); }
+.role-producer { --role-accent: var(--producer-accent); --role-soft: var(--producer-soft); }
 
 /* ---- 生産者向け「シニア配慮モード」 ----
    研究ノート(jimoseri/research_notes)の通り、生産者側は高齢の利用者が多いと
