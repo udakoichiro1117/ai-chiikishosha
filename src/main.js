@@ -405,25 +405,9 @@ function renderHome() {
   const hasDrafts = restaurantDraftActive || producerDraftActive
 
   return `
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="hero-greeting">${greeting}</p>
-        <h1 class="hero-heading">今日も、関西の<br class="br-mobile" />おいしいを見つけよう。</h1>
-        <p class="hero-sub">飲食店の「欲しい」と、農家さんの「売りたい」を、1つの仕入れ案にまとめます。</p>
-        <div class="step-flow">
-          <div class="step-item"><span class="step-icon">💬</span><span class="step-label">希望を入力</span></div>
-          <span class="step-dots"></span>
-          <div class="step-item"><span class="step-icon">✨</span><span class="step-label">AIが条件を整理</span></div>
-          <span class="step-dots"></span>
-          <div class="step-item"><span class="step-icon">🧑</span><span class="step-label">複数の農家を組み合わせ</span></div>
-          <span class="step-dots"></span>
-          <div class="step-item"><span class="step-icon">📄</span><span class="step-label">1つの仕入れ案</span></div>
-        </div>
-      </div>
-      <div class="hero-deco" aria-hidden="true">
-        <span class="hero-sun"></span>
-        <div class="hero-stall">🍅🍆🌿</div>
-      </div>
+    <section class="hero hero-compact">
+      <p class="hero-greeting">${greeting}</p>
+      <h1 class="hero-heading">今日も、関西のおいしいを見つけよう。</h1>
     </section>
 
     ${hasDrafts ? `
@@ -457,6 +441,20 @@ function renderHome() {
         </button>
       </div>
     </section>
+
+    <details class="how-it-works">
+      <summary>使い方を見る(4ステップの流れ)</summary>
+      <p class="hero-sub">飲食店の「欲しい」と、農家さんの「売りたい」を、1つの仕入れ案にまとめます。</p>
+      <div class="step-flow">
+        <div class="step-item"><span class="step-icon">💬</span><span class="step-label">希望を入力</span></div>
+        <span class="step-dots"></span>
+        <div class="step-item"><span class="step-icon">✨</span><span class="step-label">AIが条件を整理</span></div>
+        <span class="step-dots"></span>
+        <div class="step-item"><span class="step-icon">🧑</span><span class="step-label">複数の農家を組み合わせ</span></div>
+        <span class="step-dots"></span>
+        <div class="step-item"><span class="step-icon">📄</span><span class="step-label">1つの仕入れ案</span></div>
+      </div>
+    </details>
   `
 }
 
