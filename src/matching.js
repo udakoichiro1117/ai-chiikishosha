@@ -5,7 +5,7 @@ import { distanceKm } from './geo.js'
 
 export const MATCH_RADIUS_KM = 10
 
-function hasCoords(obj) {
+export function hasCoords(obj) {
   return typeof obj?.lat === 'number' && typeof obj?.lng === 'number'
 }
 
@@ -17,7 +17,8 @@ function regionCompatible(requestRegion, farmRegion) {
 
 // 飲食店・農家の双方に緯度経度があれば実距離(半径10km)で絞り込み、
 // どちらかに位置情報がない場合(ジオコーディング失敗・未入力)は地域名の文字列一致にフォールバックする。
-function locationCompatible(request, farm) {
+// おまかせ救済タブ(rescue.js)からも同じ判定基準を再利用するためexportする。
+export function locationCompatible(request, farm) {
   if (hasCoords(request) && hasCoords(farm)) {
     return distanceKm(request.lat, request.lng, farm.lat, farm.lng) <= MATCH_RADIUS_KM
   }

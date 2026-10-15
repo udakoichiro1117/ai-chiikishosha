@@ -4,6 +4,8 @@ import { parseRequestText, parseListingText, offGradeMentioned } from './parser.
 import { computeAllocation, describeInventoryDiff, MATCH_RADIUS_KM } from './matching.js'
 import { geocodeAddress } from './geo.js'
 import { renderResultMap, destroyResultMap } from './map.js'
+import { computeExpiryDate, daysUntil } from './freshness.js'
+import { buildRescueSuggestions } from './rescue.js'
 
 const STORAGE_KEY = 'ai-chiikishosha-state-v1'
 
@@ -71,7 +73,7 @@ function saveState() {
 function setState(patch) {
   state = { ...state, ...patch }
   // 直近どちらの役割を開いたかを覚えておき、設定画面をその役割だけに絞り込む。
-  if (patch.screen === 'restaurant' || patch.screen === 'restaurant-register') state.lastRole = 'restaurant'
+  if (patch.screen === 'restaurant' || patch.screen === 'restaurant-register' || patch.screen === 'rescue') state.lastRole = 'restaurant'
   else if (patch.screen === 'producer' || patch.screen === 'producer-register') state.lastRole = 'producer'
   saveState()
   render()
@@ -156,6 +158,20 @@ function renderGeoStatus(profile) {
     return `<p class="zip-msg">📍 位置情報を取得できませんでした。地域名でのマッチングになります</p>`
   }
   return ''
+}
+
+// 出品一覧の「鮮度期限」セル。期限までの残り日数に応じて緊急度を色分け表示する。
+function renderFreshnessCell(p) {
+  const expiryDate = p.expiryDate || computeExpiryDate(p.availableDate, p.item)
+  if (!expiryDate) return '―'
+  const daysLeft = daysUntil(expiryDate)
+  let urgency = 'ok'
+  let label = `残り${daysLeft}日`
+  if (daysLeft < 0) { urgency = 'expired'; label = '期限切れ' }
+  else if (daysLeft === 0) { urgency = 'urgent'; label = '本日まで' }
+  else if (daysLeft === 1) { urgency = 'urgent'; label = '明日まで' }
+  else if (daysLeft <= 3) { urgency = 'soon' }
+  return `<span class="freshness-badge freshness-${urgency}">${escapeHtml(expiryDate)}(${label})</span>`
 }
 
 // ---------- イベントハンドラ ----------
@@ -330,6 +346,34 @@ function handleSavePlan() {
   setState({ savedPlans: [...state.savedPlans, plan] })
 }
 
+// おまかせ救済タブで選んだ出品をそのまま仕入れ案にする。品目を問わないおまかせ提案から
+// 自ら選んだ時点で規格外は承知の上とみなし、allowOffGradeは常にtrueにして除外されないようにする。
+// 他の農家の同品目在庫と自動的に組み合わされる場合もある(matching.jsの複数農家合成の仕組みをそのまま利用)。
+function handleRescueAdopt(farmId) {
+  const farm = state.producers.find(p => p.id === farmId)
+  if (!farm) return
+  const parsed = {
+    item: farm.item,
+    quantity: farm.quantity,
+    unit: farm.unit,
+    neededDate: farm.availableDate,
+    region: state.restaurantProfile?.preferredRegion || farm.region,
+    allowOffGrade: true,
+    priceLimit: null,
+    lat: state.restaurantProfile?.lat ?? null,
+    lng: state.restaurantProfile?.lng ?? null
+  }
+  const result = computeAllocation(parsed, state.producers)
+  const snapshot = state.producers.map(p => ({ id: p.id, farmName: p.farmName, quantity: p.quantity, unit: p.unit, available: p.available }))
+  showFlash(`おまかせ救済から仕入れ案を作成しました(${farm.item} ${fmtNum(farm.quantity)}${farm.unit})`, {
+    parsed,
+    result,
+    resultSnapshot: snapshot,
+    requestText: `(おまかせ救済)${farm.farmName}の${farm.item} ${fmtNum(farm.quantity)}${farm.unit}を仕入れる`,
+    screen: 'restaurant'
+  })
+}
+
 function handleProducerQuantityChange(id, value) {
   const quantity = Math.max(0, Number(value) || 0)
   const producers = state.producers.map(p => p.id === id ? { ...p, quantity } : p)
@@ -482,6 +526,7 @@ function handleListingStepThreeSubmit(form) {
     deliveryFee: Number(data.get('deliveryFee') || 0),
     available: true
   }
+  producer.expiryDate = computeExpiryDate(producer.availableDate, producer.item)
   showFlash(`出品を登録しました(${producer.item} ${fmtNum(producer.quantity)}${producer.unit})`, {
     producers: [...state.producers, producer],
     listingDraft: null,
@@ -533,6 +578,7 @@ function initResultMapIfNeeded() {
 function activeNavKey() {
   if (state.screen === 'restaurant' || state.screen === 'restaurant-register') return 'restaurant'
   if (state.screen === 'producer' || state.screen === 'producer-register') return 'producer'
+  if (state.screen === 'rescue') return 'rescue'
   if (state.screen === 'records') return 'records'
   if (state.screen === 'settings') return 'settings'
   return 'home'
@@ -551,6 +597,7 @@ function renderSidebar() {
       <div class="sidebar-nav">
         ${item('home', '🏠', 'ホーム')}
         ${item('restaurant', '🛒', '仕入れ')}
+        ${item('rescue', '⏰', 'おまかせ救済')}
         ${item('producer', '🌱', '出品')}
         ${item('records', '📖', '記録')}
         ${item('settings', '⚙️', '設定')}
@@ -568,6 +615,7 @@ function renderScreen() {
     case 'restaurant-register': return `<div class="role-restaurant">${renderRestaurantRegister()}</div>`
     case 'producer-register': return `<div class="role-producer">${renderProducerRegister()}</div>`
     case 'restaurant': return `<div class="role-restaurant">${renderRestaurant()}</div>`
+    case 'rescue': return `<div class="role-restaurant">${renderRescue()}</div>`
     case 'producer': return `<div class="role-producer">${renderProducer()}</div>`
     case 'records': return renderRecords()
     case 'settings': return renderSettings()
@@ -926,6 +974,40 @@ function renderSavedPlans() {
   `
 }
 
+function renderRescue() {
+  const suggestions = buildRescueSuggestions(state.producers, state.restaurantProfile, new Date())
+  return `
+    <section class="panel">
+      <h2>⏰ おまかせフードロス救済</h2>
+      <p class="hint">鮮度期限が近い(目安:葉物は当日〜翌日、果菜類は2〜3日)、近隣(半径${MATCH_RADIUS_KM}km)の余剰を品目を問わずおまかせで提案します。メニューの穴埋めにどうぞ。</p>
+      ${suggestions.length === 0
+        ? `<p class="hint">いまのところ、期限が近い近隣の余剰はありません。</p>`
+        : `<div class="rescue-grid">${suggestions.map(renderRescueCard).join('')}</div>`
+      }
+    </section>
+  `
+}
+
+function renderRescueCard(s) {
+  const { farm, daysLeft, distanceKm: dist } = s
+  const urgency = daysLeft <= 0 ? 'urgent' : 'soon'
+  const urgencyLabel = daysLeft <= 0 ? '本日中が期限' : '明日までが期限'
+  return `
+    <div class="rescue-card">
+      <div class="rescue-card-head">
+        <span class="freshness-badge freshness-${urgency}">${urgencyLabel}</span>
+        ${typeof dist === 'number' ? `<span class="badge badge-distance">約${dist.toFixed(1)}km</span>` : ''}
+        ${farm.isOffGrade ? `<span class="badge badge-offgrade">規格外:${escapeHtml(farm.offGradeReason || '形の不揃い')}</span>` : '<span class="badge badge-normal">通常品</span>'}
+      </div>
+      <div class="rescue-item">${escapeHtml(farm.item)}<span class="rescue-qty">${fmtNum(farm.quantity)}${escapeHtml(farm.unit)}</span></div>
+      <div class="rescue-meta">${escapeHtml(farm.farmName)}・単価${fmtNum(farm.unitPrice)}円/${escapeHtml(farm.unit)}</div>
+      <div class="actions">
+        <button type="button" data-rescue-adopt="${farm.id}" class="primary">この内容で仕入れ案を作る</button>
+      </div>
+    </div>
+  `
+}
+
 function renderListingStepTwo() {
   const d = state.listingDraft || {}
   const photo = state.photoResult
@@ -1009,7 +1091,7 @@ function renderProducerTable() {
   return `
     <div class="table-scroll">
       <table class="producer-table">
-        <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>規格外</th><th>状態</th><th></th></tr></thead>
+        <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>鮮度期限</th><th>規格外</th><th>状態</th><th></th></tr></thead>
         <tbody>
           ${state.producers.map(p => `
             <tr class="${p.available === false ? 'unavailable' : ''}">
@@ -1018,6 +1100,7 @@ function renderProducerTable() {
               <td><input type="number" min="0" step="0.1" value="${p.quantity}" data-qty-id="${p.id}" style="width:5em" />${escapeHtml(p.unit)}</td>
               <td>${fmtNum(p.unitPrice)}円</td>
               <td>${escapeHtml(p.availableDate || '')}</td>
+              <td>${renderFreshnessCell(p)}</td>
               <td>${p.isOffGrade ? `規格外(${escapeHtml(p.offGradeReason || '')})` : '通常品'}</td>
               <td>${p.available === false ? '出荷不可' : '出荷可能'}</td>
               <td class="table-actions">
@@ -1231,6 +1314,9 @@ function attachEvents() {
   document.getElementById('recompute-btn')?.addEventListener('click', handleRecomputeClick)
   document.getElementById('save-plan-btn')?.addEventListener('click', handleSavePlan)
   document.getElementById('toggle-result-map')?.addEventListener('click', () => setState({ showResultMap: !state.showResultMap }))
+  document.querySelectorAll('[data-rescue-adopt]').forEach(btn => {
+    btn.addEventListener('click', () => handleRescueAdopt(btn.dataset.rescueAdopt))
+  })
 
   document.getElementById('listing-voice-btn')?.addEventListener('click', () => startVoiceInput('listing-text', 'listing-voice-msg'))
   document.getElementById('listing-parse-btn')?.addEventListener('click', handleListingParseClick)

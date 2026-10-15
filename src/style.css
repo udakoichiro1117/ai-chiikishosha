@@ -12,6 +12,8 @@
   --restaurant-soft: #f6e9dc;
   --producer-accent: #3f7d4f;
   --producer-soft: #e3efe4;
+  --caution: #92650f;
+  --caution-soft: #fbf0d9;
   font-family: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
 }
 
@@ -392,6 +394,31 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .badge-normal { background: var(--accent-soft); color: var(--accent); }
 .badge-offgrade { background: var(--warn-soft); color: var(--warn); }
 .badge-distance { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+
+.freshness-badge { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; white-space: nowrap; display: inline-block; }
+.freshness-ok { background: var(--accent-soft); color: var(--accent); }
+.freshness-soon { background: var(--caution-soft); color: var(--caution); }
+.freshness-urgent { background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+.freshness-expired { background: var(--border); color: var(--muted); text-decoration: line-through; }
+
+.rescue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.rescue-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rescue-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rescue-item { font-size: 1.2rem; font-weight: 700; }
+.rescue-qty { font-size: 0.85rem; font-weight: 400; color: var(--muted); margin-left: 6px; }
+.rescue-meta { font-size: 0.82rem; color: var(--muted); }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }

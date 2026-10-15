@@ -1,10 +1,16 @@
 // デモ用の初期データ。仕様書8.「課題が解けた瞬間」のA/B/C農家をそのまま再現する。
 // 日付は実行日を基準にした相対日付（明後日）で生成し、いつ実行しても成立するようにする。
 
+// toISOString()はUTCへ変換するため、JST(UTC+9)環境では日付が1日ずれることがある
+// (例:日付をまたぐ深夜0時〜9時台のJSTで、UTCではまだ前日)。
+// parser.jsのformatLocalDateと同じ理由で、ローカルの年月日をそのまま文字列化する。
 function addDays(base, days) {
   const d = new Date(base)
   d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 export const DEMO_REGION = '大阪近郊'
