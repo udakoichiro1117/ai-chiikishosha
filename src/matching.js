@@ -1,10 +1,27 @@
 // 配分ロジック（03spec.md 3.「実装範囲：A」「配分では…」/ 5.イレギュラーケース 準拠）。
 // AIは候補作成の補助であり、数量・在庫・単位・条件の正しさはすべてここ（通常ロジック）で検証する。
 
+import { distanceKm } from './geo.js'
+
+export const MATCH_RADIUS_KM = 10
+
+function hasCoords(obj) {
+  return typeof obj?.lat === 'number' && typeof obj?.lng === 'number'
+}
+
 function regionCompatible(requestRegion, farmRegion) {
   if (!requestRegion) return true // 指定なしは絞り込まない
   if (!farmRegion) return false
   return farmRegion.includes(requestRegion) || requestRegion.includes(farmRegion)
+}
+
+// 飲食店・農家の双方に緯度経度があれば実距離(半径10km)で絞り込み、
+// どちらかに位置情報がない場合(ジオコーディング失敗・未入力)は地域名の文字列一致にフォールバックする。
+function locationCompatible(request, farm) {
+  if (hasCoords(request) && hasCoords(farm)) {
+    return distanceKm(request.lat, request.lng, farm.lat, farm.lng) <= MATCH_RADIUS_KM
+  }
+  return regionCompatible(request.region, farm.region)
 }
 
 function dateCompatible(requestDate, farmDate) {
@@ -30,7 +47,11 @@ function classifyExclusion(request, farm) {
   if (farm.unit !== request.unit) return '数量単位が異なる'
   if (farm.quantity <= 0) return '在庫なし'
   if (!dateCompatible(request.neededDate, farm.availableDate)) return '希望日と出荷可能日が異なる'
-  if (!regionCompatible(request.region, farm.region)) return '地域が条件外'
+  if (!locationCompatible(request, farm)) {
+    return hasCoords(request) && hasCoords(farm)
+      ? `受取地点から${MATCH_RADIUS_KM}km圏外(${distanceKm(request.lat, request.lng, farm.lat, farm.lng).toFixed(1)}km)`
+      : '地域が条件外'
+  }
   if (farm.isOffGrade && !request.allowOffGrade) return '規格外不可のため除外'
   return null
 }
@@ -80,7 +101,11 @@ export function computeAllocation(request, producers) {
     const search = (idx, remaining) => {
       if (idx === subset.length) {
         if (Math.abs(remaining) < 1e-6) {
-          const allocation = subset.map((farm, i) => ({ farm, amount: picks[i] }))
+          const allocation = subset.map((farm, i) => ({
+            farm,
+            amount: picks[i],
+            distanceKm: hasCoords(request) && hasCoords(farm) ? distanceKm(request.lat, request.lng, farm.lat, farm.lng) : null
+          }))
           const totalPrice = allocation.reduce((s, a) => s + a.amount * a.farm.unitPrice, 0)
           const candidate = { allocation, totalPrice, farmCount: allocation.length }
           if (!bestExact) bestExact = candidate

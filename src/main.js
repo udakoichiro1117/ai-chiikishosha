@@ -1,14 +1,15 @@
 import './style.css'
 import { buildDefaultProducers, buildDefaultRequestText, DEMO_REGION, DEMO_LOCATION, DEMO_TIME, VEGETABLE_OPTIONS, REGION_BROAD_OPTIONS, OSAKA_CITY_OPTIONS } from './data.js'
 import { parseRequestText, parseListingText, offGradeMentioned } from './parser.js'
-import { computeAllocation, describeInventoryDiff } from './matching.js'
+import { computeAllocation, describeInventoryDiff, MATCH_RADIUS_KM } from './matching.js'
+import { geocodeAddress } from './geo.js'
 
 const STORAGE_KEY = 'ai-chiikishosha-state-v1'
 
 /** @type {{
  *  screen: 'home'|'restaurant'|'producer'|'restaurant-register'|'producer-register',
- *  restaurantProfile: {storeName:string,postalCode:string,address:string,preferredRegion:string,defaultAllowOffGrade:boolean}|null,
- *  producerProfile: {farmName:string,postalCode:string,address:string,station:string,contactName:string}|null,
+ *  restaurantProfile: {storeName:string,postalCode:string,address:string,preferredRegion:string,defaultAllowOffGrade:boolean,lat?:number|null,lng?:number|null}|null,
+ *  producerProfile: {farmName:string,postalCode:string,address:string,station:string,contactName:string,lat?:number|null,lng?:number|null}|null,
  *  producers: any[],
  *  requestText: string,
  *  parsed: {item:string,quantity:number,unit:string,neededDate:string,region:string,allowOffGrade:boolean,priceLimit:number|null,source:string}|null,
@@ -139,6 +140,17 @@ function fmtNum(n) {
   return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
 }
 
+// 住所から取得した位置情報の有無を表示する(距離マッチングが使えているかの透明性のため)。
+function renderGeoStatus(profile) {
+  if (typeof profile.lat === 'number' && typeof profile.lng === 'number') {
+    return `<p class="zip-msg">📍 位置情報を取得しました(半径${MATCH_RADIUS_KM}km以内の候補でマッチングします)</p>`
+  }
+  if (profile.address) {
+    return `<p class="zip-msg">📍 位置情報を取得できませんでした。地域名でのマッチングになります</p>`
+  }
+  return ''
+}
+
 // ---------- イベントハンドラ ----------
 
 async function tryAiParseGeneric(text, knownItems, mode, fallbackFn) {
@@ -203,7 +215,9 @@ function readParsedForm() {
     neededDate: document.getElementById('f-date').value || null,
     region: document.getElementById('f-region').value || null,
     priceLimit: document.getElementById('f-price').value ? Number(document.getElementById('f-price').value) : null,
-    allowOffGrade: document.getElementById('f-offgrade').checked
+    allowOffGrade: document.getElementById('f-offgrade').checked,
+    lat: state.restaurantProfile?.lat ?? null,
+    lng: state.restaurantProfile?.lng ?? null
   }
 }
 
@@ -280,6 +294,16 @@ function handleProducerDelete(id) {
   setState({ producers })
 }
 
+// 住所をジオコーディングし、解決できれば緯度経度をプロフィールに追記する(マッチングの距離絞り込み用)。
+// 入力が速く終わる画面遷移はブロックしない(バックグラウンドで実行し、終わり次第setStateで反映)。
+// 解決時に住所が変わっていたら(ユーザーが再編集した等)、古い結果は破棄する。
+async function geocodeAndAttach(profileKey, address) {
+  const coords = await geocodeAddress(address)
+  const current = state[profileKey]
+  if (!coords || !current || current.address !== address) return
+  setState({ [profileKey]: { ...current, lat: coords.lat, lng: coords.lng } })
+}
+
 function handleRestaurantRegisterSubmit(form) {
   const data = new FormData(form)
   const wasEdit = !!state.restaurantProfile
@@ -288,9 +312,12 @@ function handleRestaurantRegisterSubmit(form) {
     postalCode: String(data.get('postalCode') || ''),
     address: String(data.get('address') || ''),
     preferredRegion: String(data.get('preferredRegion') || ''),
-    defaultAllowOffGrade: data.get('defaultAllowOffGrade') === 'on'
+    defaultAllowOffGrade: data.get('defaultAllowOffGrade') === 'on',
+    lat: null,
+    lng: null
   }
   showFlash(wasEdit ? '受取条件を保存しました' : '受取条件を設定しました', { restaurantProfile, screen: 'restaurant' })
+  geocodeAndAttach('restaurantProfile', restaurantProfile.address)
 }
 
 function handleRestaurantRegisterSkip() {
@@ -312,9 +339,12 @@ function handleProducerRegisterSubmit(form) {
     postalCode: String(data.get('postalCode') || ''),
     address: String(data.get('address') || ''),
     station: String(data.get('station') || ''),
-    contactName: String(data.get('contactName') || '')
+    contactName: String(data.get('contactName') || ''),
+    lat: null,
+    lng: null
   }
   showFlash(wasEdit ? '農園情報を保存しました' : '農園情報を登録しました', { producerProfile, screen: 'producer' })
+  geocodeAndAttach('producerProfile', producerProfile.address)
 }
 
 function handleListingStepTwoNext(form) {
@@ -351,6 +381,8 @@ function handleListingStepThreeSubmit(form) {
   const producer = {
     id,
     farmName: state.producerProfile?.farmName || '新規農家',
+    lat: state.producerProfile?.lat ?? null,
+    lng: state.producerProfile?.lng ?? null,
     item: state.listingDraft.item,
     availableDate: state.listingDraft.availableDate,
     region: state.listingDraft.region,
@@ -547,6 +579,7 @@ function renderRestaurantRegister() {
           <span id="restaurant-zip-msg" class="zip-msg"></span>
         </label>
         <label>住所<input id="restaurant-address" name="address" type="text" value="${escapeHtml(p.address || '')}" placeholder="例:大阪市北区..." /></label>
+        ${renderGeoStatus(p)}
         <label>受取希望エリア
           <select name="preferredRegion">
             <option value="" ${!p.preferredRegion ? 'selected' : ''}>指定なし</option>
@@ -591,6 +624,7 @@ function renderProducerRegister() {
           <span id="producer-zip-msg" class="zip-msg"></span>
         </label>
         <label>住所<input id="producer-address" name="address" type="text" required value="${escapeHtml(p.address || '')}" placeholder="例:大阪府豊能郡能勢町..." /></label>
+        ${renderGeoStatus(p)}
         <label>最寄り駅<input name="station" type="text" value="${escapeHtml(p.station || '')}" placeholder="例:能勢電鉄 山下駅" /></label>
         <label>担当者名<input name="contactName" type="text" value="${escapeHtml(p.contactName || '')}" placeholder="例:森畠正輝" /></label>
       </form>
@@ -727,6 +761,7 @@ function renderResult() {
           <div class="alloc-card">
             <div class="alloc-card-head">
               <span class="alloc-farm">${escapeHtml(a.farm.farmName)}</span>
+              ${typeof a.distanceKm === 'number' ? `<span class="badge badge-distance">約${a.distanceKm.toFixed(1)}km</span>` : ''}
               ${a.farm.isOffGrade ? `<span class="badge badge-offgrade">規格外:${escapeHtml(a.farm.offGradeReason || '形の不揃い')}</span>` : '<span class="badge badge-normal">通常品</span>'}
             </div>
             <div class="alloc-amount">${fmtNum(a.amount)}<span class="alloc-unit">${escapeHtml(a.farm.unit)}</span></div>
