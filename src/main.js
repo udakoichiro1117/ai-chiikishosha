@@ -1,5 +1,5 @@
 import './style.css'
-import { buildDefaultProducers, buildDefaultRequestText, DEMO_REGION, DEMO_LOCATION, DEMO_TIME, VEGETABLE_OPTIONS, REGION_BROAD_OPTIONS, OSAKA_CITY_OPTIONS } from './data.js'
+import { buildDefaultRequestText, DEMO_REGION, DEMO_LOCATION, DEMO_TIME, VEGETABLE_OPTIONS, REGION_BROAD_OPTIONS, OSAKA_CITY_OPTIONS } from './data.js'
 import { parseRequestText, parseListingText, offGradeMentioned } from './parser.js'
 import { computeAllocation, describeInventoryDiff, MATCH_RADIUS_KM } from './matching.js'
 import { geocodeAddress } from './geo.js'
@@ -14,6 +14,8 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  restaurantProfile: {storeName:string,postalCode:string,address:string,preferredRegion:string,defaultAllowOffGrade:boolean,lat?:number|null,lng?:number|null}|null,
  *  producerProfile: {farmName:string,postalCode:string,address:string,station:string,contactName:string,lat?:number|null,lng?:number|null}|null,
  *  producers: any[],
+ *  producersLoading: boolean,
+ *  producersError: string|null,
  *  requestText: string,
  *  parsed: {item:string,quantity:number,unit:string,neededDate:string,region:string,allowOffGrade:boolean,priceLimit:number|null,source:string}|null,
  *  result: any|null,
@@ -22,6 +24,8 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  listingDraft: {item:string,availableDate:string,region:string,quantity?:number|null,unit?:string,unitPrice?:number|null,isOffGrade?:boolean,offGradeReason?:string,source?:string}|null,
  *  listingStep: 2|3,
  *  listingText: string,
+ *  listingSubmitting: boolean,
+ *  listingSubmitError: string|null,
  *  photoResult: {item:string,isOffGrade:boolean,offGradeReason:string,source:string}|null,
  *  lastRole: 'restaurant'|'producer'|null,
  *  largeText: boolean,
@@ -33,13 +37,14 @@ function loadState() {
   // ①入口は毎回「飲食店 / 生産者」の選択画面から始める(画面は保存しない)。
   // プロフィール(店舗名・住所等)と、入力途中のデータはlocalStorageから復元する。
   // これにより初回登録さえ済ませれば、2回目以降はログイン状態を保ったまま使える。
+  // producers(出品一覧)はサーバー(api/listings)が唯一の正であり、localStorageには保存しない
+  // (保存しておくと、他の端末からの変更が反映されないまま古いコピーが復元されてしまう)。
+  // 読み込み直後は常に空配列+producersLoading:trueとし、fetchListings()で取得する。
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed.producers) && parsed.producers.length > 0) {
-        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, screen: 'home' }
-      }
+      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, screen: 'home' }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
@@ -53,7 +58,11 @@ function loadState() {
     lastRole: null,
     largeText: false,
     showResultMap: false,
-    producers: buildDefaultProducers(),
+    producers: [],
+    producersLoading: true,
+    producersError: null,
+    listingSubmitting: false,
+    listingSubmitError: null,
     requestText: buildDefaultRequestText(),
     parsed: null,
     result: null,
@@ -64,8 +73,9 @@ function loadState() {
 
 function saveState() {
   try {
-    // flashMessageは一時的なUI通知なので保存対象から除く(再読み込み時に再表示されないように)。
-    const { flashMessage, ...persisted } = state
+    // flashMessageは一時的なUI通知、producers関連はサーバーが正、listingSubmit*は送信中フラグなので、
+    // いずれも保存対象から除く(保存すると、例えば送信中のまま再読み込みした際に固まって見える)。
+    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, ...persisted } = state
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted))
   } catch (e) { /* 保存できなくても画面表示は継続する */ }
 }
@@ -84,29 +94,6 @@ function showFlash(message, extraPatch = {}) {
   clearTimeout(flashTimer)
   setState({ ...extraPatch, flashMessage: message })
   flashTimer = setTimeout(() => setState({ flashMessage: null }), 2600)
-}
-
-function resetDemo() {
-  state = {
-    screen: state.screen,
-    restaurantProfile: state.restaurantProfile,
-    producerProfile: state.producerProfile,
-    lastRole: state.lastRole,
-    largeText: state.largeText,
-    showResultMap: false,
-    listingDraft: null,
-    listingStep: 2,
-    listingText: '',
-    photoResult: null,
-    producers: buildDefaultProducers(),
-    requestText: buildDefaultRequestText(),
-    parsed: null,
-    result: null,
-    resultSnapshot: null,
-    savedPlans: []
-  }
-  saveState()
-  render()
 }
 
 function knownItemNames() {
@@ -175,6 +162,34 @@ function renderFreshnessCell(p) {
 }
 
 // ---------- イベントハンドラ ----------
+
+// 出品(producers)はapi/listingsを通じて全端末で共有される。所有権はパスワード等を伴わない
+// 簡易な識別(端末ごとの匿名UUID)で確認するだけなので、本格的な本人認証ではない点に注意。
+const DEVICE_ID_KEY = 'ai-chiikishosha-device-id'
+function getDeviceId() {
+  try {
+    let id = localStorage.getItem(DEVICE_ID_KEY)
+    if (!id) {
+      id = (window.crypto?.randomUUID ? window.crypto.randomUUID() : `d-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      localStorage.setItem(DEVICE_ID_KEY, id)
+    }
+    return id
+  } catch (e) {
+    return 'unknown-device'
+  }
+}
+
+async function fetchListings() {
+  setState({ producersLoading: true, producersError: null })
+  try {
+    const res = await fetch('/api/listings')
+    if (!res.ok) throw new Error('api not ok')
+    const { listings } = await res.json()
+    setState({ producers: listings, producersLoading: false, producersError: null })
+  } catch (e) {
+    setState({ producersLoading: false, producersError: '出品データの取得に失敗しました。通信状況を確認して、再読み込みしてください。' })
+  }
+}
 
 async function tryAiParseGeneric(text, knownItems, mode, fallbackFn) {
   try {
@@ -323,7 +338,7 @@ function handleRestartRestaurant() {
 }
 
 function handleRestartProducer() {
-  setState({ listingDraft: null, listingStep: 2, listingText: '', photoResult: null, screen: 'producer' })
+  setState({ listingDraft: null, listingStep: 2, listingText: '', photoResult: null, listingSubmitError: null, screen: 'producer' })
 }
 
 function handleComputeClick() {
@@ -374,23 +389,53 @@ function handleRescueAdopt(farmId) {
   })
 }
 
+// 出品の更新・削除は、作成時に記録したownerId(端末ごとの匿名UUID)が一致する場合のみ
+// サーバー側で許可される。一致しない場合(=別の端末で登録された出品)は403が返るため、
+// その旨をメッセージで案内する。いずれも楽観的更新(先に画面を更新)→失敗時はロールバック。
+async function patchListing(id, patch) {
+  const prev = state.producers
+  setState({ producers: prev.map(p => p.id === id ? { ...p, ...patch } : p) })
+  try {
+    const res = await fetch(`/api/listings?id=${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ownerId: getDeviceId(), ...patch })
+    })
+    if (!res.ok) {
+      setState({ producers: prev })
+      showFlash(res.status === 403 ? 'この出品は別の端末で登録されたため変更できません' : '出品の更新に失敗しました。通信状況を確認してください。')
+    }
+  } catch (e) {
+    setState({ producers: prev })
+    showFlash('出品の更新に失敗しました。通信状況を確認してください。')
+  }
+}
+
 function handleProducerQuantityChange(id, value) {
   const quantity = Math.max(0, Number(value) || 0)
-  const producers = state.producers.map(p => p.id === id ? { ...p, quantity } : p)
-  setState({ producers })
+  patchListing(id, { quantity })
 }
 
 function handleProducerAvailabilityToggle(id) {
-  const producers = state.producers.map(p => p.id === id ? { ...p, available: !p.available } : p)
-  setState({ producers })
+  const target = state.producers.find(p => p.id === id)
+  if (!target) return
+  patchListing(id, { available: !target.available })
 }
 
-function handleProducerDelete(id) {
+async function handleProducerDelete(id) {
   const target = state.producers.find(p => p.id === id)
   const label = target ? `${target.farmName}・${target.item}(${fmtNum(target.quantity)}${target.unit})` : 'この出品'
   if (!window.confirm(`${label}を削除します。元に戻せません。よろしいですか？`)) return
-  const producers = state.producers.filter(p => p.id !== id)
-  setState({ producers })
+  try {
+    const res = await fetch(`/api/listings?id=${encodeURIComponent(id)}&ownerId=${encodeURIComponent(getDeviceId())}`, { method: 'DELETE' })
+    if (!res.ok) {
+      showFlash(res.status === 403 ? 'この出品は別の端末で登録されたため削除できません' : '出品の削除に失敗しました。通信状況を確認してください。')
+      return
+    }
+    setState({ producers: state.producers.filter(p => p.id !== id) })
+  } catch (e) {
+    showFlash('出品の削除に失敗しました。通信状況を確認してください。')
+  }
 }
 
 // 住所をジオコーディングし、解決できれば緯度経度をプロフィールに追記する(マッチングの距離絞り込み用)。
@@ -503,11 +548,10 @@ async function handleListingPhotoChange(input) {
   }
 }
 
-function handleListingStepThreeSubmit(form) {
+async function handleListingStepThreeSubmit(form) {
   const data = new FormData(form)
-  const id = `P${Date.now()}`
-  const producer = {
-    id,
+  const payload = {
+    ownerId: getDeviceId(),
     farmName: state.producerProfile?.farmName || '新規農家',
     lat: state.producerProfile?.lat ?? null,
     lng: state.producerProfile?.lng ?? null,
@@ -523,15 +567,26 @@ function handleListingStepThreeSubmit(form) {
     deliveryTime: String(data.get('deliveryTime') || ''),
     minQuantity: Number(data.get('minQuantity') || 1),
     incrementStep: Number(data.get('incrementStep') || 1),
-    deliveryFee: Number(data.get('deliveryFee') || 0),
-    available: true
+    deliveryFee: Number(data.get('deliveryFee') || 0)
   }
-  producer.expiryDate = computeExpiryDate(producer.availableDate, producer.item)
-  showFlash(`出品を登録しました(${producer.item} ${fmtNum(producer.quantity)}${producer.unit})`, {
-    producers: [...state.producers, producer],
-    listingDraft: null,
-    listingStep: 2
-  })
+  setState({ listingSubmitting: true, listingSubmitError: null })
+  try {
+    const res = await fetch('/api/listings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!res.ok) throw new Error('api not ok')
+    const { listing } = await res.json()
+    showFlash(`出品を登録しました(${listing.item} ${fmtNum(listing.quantity)}${listing.unit})`, {
+      producers: [...state.producers, listing],
+      listingDraft: null,
+      listingStep: 2,
+      listingSubmitting: false
+    })
+  } catch (e) {
+    setState({ listingSubmitting: false, listingSubmitError: '出品の登録に失敗しました。通信状況を確認してもう一度お試しください。' })
+  }
 }
 
 // ---------- 画面描画 ----------
@@ -800,6 +855,7 @@ function renderRestaurant() {
       <span>ログイン中:<strong>${escapeHtml(state.restaurantProfile?.storeName || '')}</strong>${prefsLine ? ` (${escapeHtml(prefsLine)})` : ''}</span>
       <button id="edit-restaurant-profile" class="edit-chip">✎ 受取条件を編集</button>
     </section>
+    ${renderProducersStatus()}
     <section class="panel">
       <h2>② 欲しい食材・数量・受取条件を伝える</h2>
       <p class="hint">自然文のまま入力できます。(例:「明後日までに大阪近郊のトマトを10kg、多少形が悪くてもOK」)</p>
@@ -980,6 +1036,7 @@ function renderRescue() {
     <section class="panel">
       <h2>⏰ おまかせフードロス救済</h2>
       <p class="hint">鮮度期限が近い(目安:葉物は当日〜翌日、果菜類は2〜3日)、近隣(半径${MATCH_RADIUS_KM}km)の余剰を品目を問わずおまかせで提案します。メニューの穴埋めにどうぞ。</p>
+      ${renderProducersStatus()}
       ${suggestions.length === 0
         ? `<p class="hint">いまのところ、期限が近い近隣の余剰はありません。</p>`
         : `<div class="rescue-grid">${suggestions.map(renderRescueCard).join('')}</div>`
@@ -1079,12 +1136,23 @@ function renderListingStepThree() {
           <label>販売刻み<input form="listing-step3-form" name="incrementStep" type="number" min="0.1" step="0.1" value="1" /></label>
         </div>
       </details>
+      ${state.listingSubmitError ? `<p class="warn">${escapeHtml(state.listingSubmitError)}</p>` : ''}
       <div class="actions">
-        <button id="listing-step3-back">← ②に戻る</button>
-        <button id="listing-step3-submit" class="primary">登録する</button>
+        <button id="listing-step3-back" ${state.listingSubmitting ? 'disabled' : ''}>← ②に戻る</button>
+        <button id="listing-step3-submit" class="primary" ${state.listingSubmitting ? 'disabled' : ''}>${state.listingSubmitting ? '登録しています…' : '登録する'}</button>
       </div>
     </section>
   `
+}
+
+// 出品一覧(producers)はapi/listingsから全端末共有で取得する。読み込み中・失敗時の状態と、
+// 手動更新ボタンをここでまとめて表示する(リアルタイム同期ではなく、画面を開く/押すたびに最新化する方式)。
+function renderProducersStatus() {
+  if (state.producersLoading) return `<p class="hint">出品データを読み込み中…</p>`
+  if (state.producersError) {
+    return `<p class="warn">${escapeHtml(state.producersError)} <button type="button" data-refresh-listings class="table-btn">再読み込み</button></p>`
+  }
+  return `<div class="actions"><button type="button" data-refresh-listings class="ghost-btn">🔄 最新の状態に更新</button></div>`
 }
 
 function renderProducerTable() {
@@ -1124,6 +1192,7 @@ function renderProducer() {
 
     <section class="panel">
       <h2>④ 登録結果を確認(飲食店への提案に使われる)</h2>
+      ${renderProducersStatus()}
       ${renderProducerTable()}
       <p class="hint">⑤ 数量・公開状態を変えたら、飲食店タブで「在庫の最新状態で再計算」を押すと反映されます(在庫変動・欠品ケースのデモ)。</p>
     </section>
@@ -1139,6 +1208,7 @@ function renderRecords() {
     ${state.savedPlans.length ? renderSavedPlans() : '<section class="panel"><p class="hint">保存済みの仕入れ案はまだありません。②の「仕入れ案を作る」で成立案を保存するとここに表示されます。</p></section>'}
     <section class="panel">
       <h3>登録済みの生産者出品一覧</h3>
+      ${renderProducersStatus()}
       ${renderProducerTable()}
     </section>
   `
@@ -1167,16 +1237,6 @@ function renderDisplaySettingsCard() {
   `
 }
 
-function renderDemoResetCard() {
-  return `
-    <section class="panel">
-      <h3>デモ操作</h3>
-      <p class="hint">在庫・保存済み案などをすべて初期状態(A/B/C農家)に戻します。プロフィールは維持されます。</p>
-      <div class="actions"><button id="reset-demo">デモデータに戻す</button></div>
-    </section>
-  `
-}
-
 function renderSettings() {
   const role = state.lastRole
 
@@ -1188,7 +1248,6 @@ function renderSettings() {
         ${renderSettingsSwitch()}
       </section>
       ${renderDisplaySettingsCard()}
-      ${renderDemoResetCard()}
     `
   }
 
@@ -1212,7 +1271,6 @@ function renderSettings() {
         <div class="actions"><button data-goto="restaurant-register" class="primary">${r ? '編集する' : '設定する'}</button></div>
       </section>
       ${renderDisplaySettingsCard()}
-      ${renderDemoResetCard()}
     `
   }
 
@@ -1234,7 +1292,6 @@ function renderSettings() {
       <div class="actions"><button data-goto="producer-register" class="primary">${p ? '編集する' : '登録する'}</button></div>
     </section>
     ${renderDisplaySettingsCard()}
-    ${renderDemoResetCard()}
   `
 }
 
@@ -1246,10 +1303,15 @@ function attachEvents() {
   document.querySelectorAll('[data-nav]').forEach(btn => {
     btn.addEventListener('click', () => {
       const key = btn.dataset.nav
+      // 仕入れ・出品・おまかせ救済・記録は他端末の出品状況に関わる画面なので、開くたびに最新化する。
+      if (['restaurant', 'producer', 'rescue', 'records'].includes(key)) fetchListings()
       if (key === 'restaurant') goToRestaurant()
       else if (key === 'producer') goToProducer()
       else setState({ screen: key })
     })
+  })
+  document.querySelectorAll('[data-refresh-listings]').forEach(btn => {
+    btn.addEventListener('click', () => fetchListings())
   })
   document.querySelectorAll('[data-goto]').forEach(btn => {
     btn.addEventListener('click', () => setState({ screen: btn.dataset.goto }))
@@ -1283,7 +1345,6 @@ function attachEvents() {
       else if (btn.dataset.restart === 'restart-producer') handleRestartProducer()
     })
   })
-  document.getElementById('reset-demo')?.addEventListener('click', resetDemo)
   document.getElementById('toggle-large-text')?.addEventListener('click', () => setState({ largeText: !state.largeText }))
 
   document.getElementById('restaurant-register-submit')?.addEventListener('click', (e) => {
@@ -1350,3 +1411,4 @@ function attachEvents() {
 }
 
 render()
+fetchListings()
