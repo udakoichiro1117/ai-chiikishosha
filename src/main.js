@@ -3,6 +3,7 @@ import { buildDefaultProducers, buildDefaultRequestText, DEMO_REGION, DEMO_LOCAT
 import { parseRequestText, parseListingText, offGradeMentioned } from './parser.js'
 import { computeAllocation, describeInventoryDiff, MATCH_RADIUS_KM } from './matching.js'
 import { geocodeAddress } from './geo.js'
+import { renderResultMap, destroyResultMap } from './map.js'
 
 const STORAGE_KEY = 'ai-chiikishosha-state-v1'
 
@@ -20,7 +21,8 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  listingStep: 2|3,
  *  listingText: string,
  *  lastRole: 'restaurant'|'producer'|null,
- *  largeText: boolean
+ *  largeText: boolean,
+ *  showResultMap: boolean
  * }} */
 let state = loadState()
 
@@ -33,7 +35,7 @@ function loadState() {
     if (raw) {
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed.producers) && parsed.producers.length > 0) {
-        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', lastRole: null, largeText: false, ...parsed, screen: 'home' }
+        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', lastRole: null, largeText: false, showResultMap: false, ...parsed, screen: 'home' }
       }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
@@ -46,6 +48,7 @@ function loadState() {
     listingText: '',
     lastRole: null,
     largeText: false,
+    showResultMap: false,
     producers: buildDefaultProducers(),
     requestText: buildDefaultRequestText(),
     parsed: null,
@@ -86,6 +89,7 @@ function resetDemo() {
     producerProfile: state.producerProfile,
     lastRole: state.lastRole,
     largeText: state.largeText,
+    showResultMap: false,
     listingDraft: null,
     listingStep: 2,
     listingText: '',
@@ -424,6 +428,26 @@ function render() {
     </div>
   `
   attachEvents()
+  initResultMapIfNeeded()
+}
+
+// Leafletは実DOM要素が必要なため、innerHTML描画後(attachEvents後)にここで初期化する。
+// コンテナが無ければ(地図を閉じている/条件未達の)場合は何もしない。
+function initResultMapIfNeeded() {
+  if (!document.getElementById('result-map')) {
+    destroyResultMap()
+    return
+  }
+  const r = state.result
+  if (!r || r.status !== 'success') return
+  const farmsWithDistance = r.allocation.filter(a => typeof a.distanceKm === 'number')
+  if (farmsWithDistance.length === 0) return
+  renderResultMap('result-map', {
+    center: { lat: state.restaurantProfile.lat, lng: state.restaurantProfile.lng },
+    centerLabel: state.restaurantProfile?.storeName || '受取地点',
+    radiusKm: MATCH_RADIUS_KM,
+    farms: farmsWithDistance.map(a => ({ farmName: a.farm.farmName, lat: a.farm.lat, lng: a.farm.lng, distanceKm: a.distanceKm }))
+  })
 }
 
 function activeNavKey() {
@@ -774,12 +798,26 @@ function renderResult() {
           <div class="alloc-price">${fmtNum(r.totalPrice)}円<span class="alloc-unitprice">(税込)</span></div>
         </div>
       </div>
+      ${renderResultMapSection(r)}
       <p class="status-note">状態:農家承認前・在庫未確保。この案は注文確定ではありません。</p>
       <div class="actions">
         <button id="recompute-btn">在庫の最新状態で再計算</button>
         <button id="save-plan-btn" class="primary">案を保存(相談用)</button>
       </div>
     </section>
+  `
+}
+
+function renderResultMapSection(r) {
+  const hasMapData = r.allocation.some(a => typeof a.distanceKm === 'number')
+  if (!hasMapData) {
+    return `<p class="hint">住所(位置情報)を登録すると、ここに仕入れ先を地図で表示できます。</p>`
+  }
+  return `
+    <div class="actions">
+      <button type="button" id="toggle-result-map" class="ghost-btn">${state.showResultMap ? '地図を閉じる' : '🗺️ 地図で見る'}</button>
+    </div>
+    ${state.showResultMap ? '<div id="result-map" class="result-map"></div>' : ''}
   `
 }
 
@@ -1099,6 +1137,7 @@ function attachEvents() {
   document.getElementById('compute-btn')?.addEventListener('click', handleComputeClick)
   document.getElementById('recompute-btn')?.addEventListener('click', handleRecomputeClick)
   document.getElementById('save-plan-btn')?.addEventListener('click', handleSavePlan)
+  document.getElementById('toggle-result-map')?.addEventListener('click', () => setState({ showResultMap: !state.showResultMap }))
 
   document.getElementById('listing-voice-btn')?.addEventListener('click', () => startVoiceInput('listing-text', 'listing-voice-msg'))
   document.getElementById('listing-parse-btn')?.addEventListener('click', handleListingParseClick)

@@ -22,10 +22,19 @@ const OFFGRADE_YES_PATTERNS = [
 ]
 const OFFGRADE_NO_PATTERNS = ['規格外不可', '通常品のみ', '形が揃った', '規格外不要']
 
+// toISOString()はUTCへ変換するため、JST(UTC+9)環境では日付が1日ずれることがある
+// (例:12/1 00:00 JSTはUTCでは11/30 15:00)。ローカルの年月日をそのまま文字列化する。
+function formatLocalDate(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 function addDays(base, days) {
   const d = new Date(base)
   d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
+  return formatLocalDate(d)
 }
 
 function extractDate(text, today) {
@@ -40,7 +49,7 @@ function extractDate(text, today) {
     const year = today.getFullYear()
     const date = new Date(year, Number(md[1]) - 1, Number(md[2]))
     if (date < today) date.setFullYear(year + 1)
-    return { date: date.toISOString().slice(0, 10), label: `${md[1]}月${md[2]}日` }
+    return { date: formatLocalDate(date), label: `${md[1]}月${md[2]}日` }
   }
   return { date: null, label: null }
 }

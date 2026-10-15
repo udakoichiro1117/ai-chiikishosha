@@ -362,6 +362,14 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   gap: 12px;
   margin-bottom: 8px;
 }
+
+.result-map {
+  height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  z-index: 0;
+}
 .alloc-card {
   border: 1px solid var(--border);
   border-radius: 10px;
