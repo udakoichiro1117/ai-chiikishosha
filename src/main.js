@@ -20,6 +20,7 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  listingDraft: {item:string,availableDate:string,region:string,quantity?:number|null,unit?:string,unitPrice?:number|null,isOffGrade?:boolean,offGradeReason?:string,source?:string}|null,
  *  listingStep: 2|3,
  *  listingText: string,
+ *  photoResult: {item:string,isOffGrade:boolean,offGradeReason:string,source:string}|null,
  *  lastRole: 'restaurant'|'producer'|null,
  *  largeText: boolean,
  *  showResultMap: boolean
@@ -35,7 +36,7 @@ function loadState() {
     if (raw) {
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed.producers) && parsed.producers.length > 0) {
-        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', lastRole: null, largeText: false, showResultMap: false, ...parsed, screen: 'home' }
+        return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, screen: 'home' }
       }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
@@ -46,6 +47,7 @@ function loadState() {
     listingDraft: null,
     listingStep: 2,
     listingText: '',
+    photoResult: null,
     lastRole: null,
     largeText: false,
     showResultMap: false,
@@ -93,6 +95,7 @@ function resetDemo() {
     listingDraft: null,
     listingStep: 2,
     listingText: '',
+    photoResult: null,
     producers: buildDefaultProducers(),
     requestText: buildDefaultRequestText(),
     parsed: null,
@@ -185,6 +188,54 @@ function tryAiParseListing(text, knownItems) {
   return tryAiParseGeneric(text, knownItems, 'listing', parseListingText)
 }
 
+// 写真からの品目・規格外判定(数量は画像から推定できないため対象外。数量は音声/手入力で別途補う)。
+// 画像解析にはルールベースの代替手段がないため、失敗時は null を返し、呼び出し側で
+// 「手入力に切り替えてください」という案内を出す。
+async function tryAiParsePhoto(base64, mimeType, knownItems) {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 8000) // 画像解析はテキストより時間がかかるため長めに待つ
+    const res = await fetch('/api/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'listing-photo', image: { data: base64, mimeType }, knownItems }),
+      signal: controller.signal
+    })
+    clearTimeout(timeout)
+    if (!res.ok) return null
+    const json = await res.json()
+    if (!json || typeof json !== 'object') return null
+    return { item: json.item || '', isOffGrade: !!json.isOffGrade, offGradeReason: json.offGradeReason || '', source: 'ai' }
+  } catch (e) {
+    return null
+  }
+}
+
+// 写真ファイルを縮小してJPEGのbase64に変換する(通信量削減・サーバー側の受け入れ上限対策)。
+function resizeImageToBase64(file, maxDim = 768, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      let { width, height } = img
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height)
+        width = Math.round(width * scale)
+        height = Math.round(height * scale)
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+      URL.revokeObjectURL(url)
+      const dataUrl = canvas.toDataURL('image/jpeg', quality)
+      resolve({ base64: dataUrl.split(',')[1], mimeType: 'image/jpeg' })
+    }
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e) }
+    img.src = url
+  })
+}
+
 // 音声入力(Web Speech API、ブラウザ標準・追加サーバー不要)。
 // 対応していないブラウザ(iOS Safariの一部等)では、その旨をメッセージ欄に表示し、
 // 手入力(自然文/構造化フォーム)にそのまま切り替えられるようにする。
@@ -256,7 +307,7 @@ function handleRestartRestaurant() {
 }
 
 function handleRestartProducer() {
-  setState({ listingDraft: null, listingStep: 2, listingText: '', screen: 'producer' })
+  setState({ listingDraft: null, listingStep: 2, listingText: '', photoResult: null, screen: 'producer' })
 }
 
 function handleComputeClick() {
@@ -353,30 +404,59 @@ function handleProducerRegisterSubmit(form) {
 
 function handleListingStepTwoNext(form) {
   const data = new FormData(form)
+  const photo = state.photoResult
   const listingDraft = {
-    item: String(data.get('item') || ''),
+    item: String(data.get('item') || '') || photo?.item || '',
     availableDate: String(data.get('availableDate') || ''),
-    region: String(data.get('region') || DEMO_REGION)
+    region: String(data.get('region') || DEMO_REGION),
+    isOffGrade: !!photo?.isOffGrade,
+    offGradeReason: photo?.offGradeReason || '',
+    source: photo?.source
   }
-  setState({ listingDraft, listingStep: 3 })
+  setState({ listingDraft, listingStep: 3, photoResult: null })
 }
 
 async function handleListingParseClick() {
   const text = document.getElementById('listing-text').value
   setState({ listingText: text })
   const extracted = await tryAiParseListing(text, itemOptions())
+  // 写真で品目・規格外の判定済みなら、それを優先して採用する(数量・単価・日付は声/文章の値を使う)。
+  const photo = state.photoResult
   const listingDraft = {
-    item: extracted.item || '',
+    item: photo?.item || extracted.item || '',
     availableDate: extracted.availableDate || '',
     region: extracted.region || DEMO_REGION,
     quantity: extracted.quantity ?? null,
     unit: extracted.unit || 'kg',
     unitPrice: extracted.unitPrice ?? null,
-    isOffGrade: !!extracted.isOffGrade,
-    offGradeReason: extracted.offGradeReason || '',
+    isOffGrade: !!(photo?.isOffGrade || extracted.isOffGrade),
+    offGradeReason: photo?.offGradeReason || extracted.offGradeReason || '',
     source: extracted.source
   }
-  setState({ listingDraft, listingStep: 3 })
+  setState({ listingDraft, listingStep: 3, photoResult: null })
+}
+
+async function handleListingPhotoChange(input) {
+  const file = input.files?.[0]
+  if (!file) return
+  const msgEl = document.getElementById('listing-photo-msg')
+  if (msgEl) msgEl.textContent = '📷 写真を解析しています…'
+  try {
+    const { base64, mimeType } = await resizeImageToBase64(file)
+    const result = await tryAiParsePhoto(base64, mimeType, itemOptions())
+    if (!result || !result.item) {
+      if (msgEl) msgEl.textContent = '写真から品目を判定できませんでした。品目は直接入力するか、声で伝えてください。'
+      return
+    }
+    setState({ photoResult: result })
+    if (msgEl) {
+      msgEl.textContent = `📷 判定結果:${result.item} / ${result.isOffGrade ? `規格外(${result.offGradeReason || '形の不揃い'})` : '通常品'}。数量は声か直接入力で伝えてください。`
+    }
+  } catch (e) {
+    if (msgEl) msgEl.textContent = '写真の解析に失敗しました。品目は直接入力するか、声で伝えてください。'
+  } finally {
+    input.value = ''
+  }
 }
 
 function handleListingStepThreeSubmit(form) {
@@ -848,10 +928,23 @@ function renderSavedPlans() {
 
 function renderListingStepTwo() {
   const d = state.listingDraft || {}
+  const photo = state.photoResult
+  const prefillItem = d.item || photo?.item || ''
   return `
     <section class="panel">
       <h2>② 出品内容を入力</h2>
-      <p class="hint">話しかけるか文章で書くと、品目・数量・単価・出荷可能日などをAIがまとめて読み取ります。(例:「トマトが5キロ採れた。1キロ800円で明日出せる。大阪近郊で。」)</p>
+      <p class="hint">泥がついた手でもすぐ使えるように、写真を撮るだけで品目・規格外の判定をAIが行います。数量は声で伝えてください。</p>
+      <div class="actions demo-fill-row">
+        <label class="ghost-btn photo-capture-btn">
+          📷 写真を撮る(品目・規格外を自動判定)
+          <input type="file" id="listing-photo-input" accept="image/*" capture="environment" style="display:none" />
+        </label>
+      </div>
+      <p id="listing-photo-msg" class="zip-msg">${photo ? `📷 判定結果:${escapeHtml(photo.item)} / ${photo.isOffGrade ? `規格外(${escapeHtml(photo.offGradeReason || '形の不揃い')})` : '通常品'}。数量は声か直接入力で伝えてください。` : ''}</p>
+    </section>
+
+    <section class="panel">
+      <p class="hint">話しかけるか文章で書くと、品目・数量・単価・出荷可能日などをAIがまとめて読み取ります。(例:「5キロ採れた。1キロ800円で明日出せる。大阪近郊で。」。写真で品目判定済みなら品目は省略できます)</p>
       <div class="actions demo-fill-row">
         <button type="button" id="listing-voice-btn" class="ghost-btn">🎤 音声で入力する</button>
       </div>
@@ -865,7 +958,7 @@ function renderListingStepTwo() {
     <section class="panel">
       <h3>または、直接入力する</h3>
       <form id="listing-step2-form" class="form-grid">
-        <label>品目<input name="item" type="text" required value="${escapeHtml(d.item || '')}" placeholder="例:トマト" /></label>
+        <label>品目<input name="item" type="text" required value="${escapeHtml(prefillItem)}" placeholder="例:トマト" /></label>
         <label>出荷可能日<input name="availableDate" type="date" required value="${d.availableDate || ''}" /></label>
         <label>地域<input name="region" type="text" value="${escapeHtml(d.region ?? DEMO_REGION)}" placeholder="${DEMO_REGION}" /></label>
       </form>
@@ -1141,6 +1234,7 @@ function attachEvents() {
 
   document.getElementById('listing-voice-btn')?.addEventListener('click', () => startVoiceInput('listing-text', 'listing-voice-msg'))
   document.getElementById('listing-parse-btn')?.addEventListener('click', handleListingParseClick)
+  document.getElementById('listing-photo-input')?.addEventListener('change', (e) => handleListingPhotoChange(e.target))
 
   document.getElementById('listing-step2-next')?.addEventListener('click', (e) => {
     e.preventDefault()

@@ -15,12 +15,19 @@ export default async function handler(req, res) {
     return
   }
 
-  const { text, knownItems, mode } = req.body || {}
-  if (typeof text !== 'string' || text.length === 0 || text.length > 500) {
+  const { text, knownItems, mode, image } = req.body || {}
+  const items = Array.isArray(knownItems) ? knownItems.slice(0, 50) : []
+
+  // mode:'listing-photo'は画像のみ(品目・規格外の視覚判定用)。それ以外は自然文(音声入力含む)が必須。
+  if (mode === 'listing-photo') {
+    if (!image || typeof image.data !== 'string' || typeof image.mimeType !== 'string' || image.data.length > 6_000_000) {
+      res.status(400).json({ error: 'invalid image' })
+      return
+    }
+  } else if (typeof text !== 'string' || text.length === 0 || text.length > 500) {
     res.status(400).json({ error: 'invalid text' })
     return
   }
-  const items = Array.isArray(knownItems) ? knownItems.slice(0, 50) : []
 
   // Geminiは「今日」を知らないため、日本時間の基準日を明示しないと
   // 「明日」「明後日」等の相対表現を絶対日付に変換できずnullになる。
@@ -28,9 +35,24 @@ export default async function handler(req, res) {
     timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit'
   }).format(new Date())
 
-  // mode:'listing' は生産者の出品登録(自然文・音声入力共通)、既定は飲食店の仕入れ希望。
-  const prompt = mode === 'listing'
-    ? `次の日本語の自然文から、生産者の出品内容をJSONで抽出してください。
+  // mode別にプロンプトを切り替える。
+  // 'listing-photo' は生産者が撮った写真から品目・規格外を視覚判定(数量は写真から推定不可のため対象外。
+  //   泥だらけの手でも、数量だけは音声/直接入力で補う前提 — main.js側で合成する)。
+  // 'listing' は生産者の出品内容(自然文・音声入力共通)、既定は飲食店の仕入れ希望。
+  let prompt
+  if (mode === 'listing-photo') {
+    prompt = `次の画像に写っている農作物について、JSONで回答してください。
+既知の品目候補: ${items.join('、') || 'なし'}
+出力は次のキーのみを持つJSONオブジェクトにしてください。品目が判別できない場合はitemをnullにしてください。
+{
+  "item": string|null,
+  "isOffGrade": boolean,
+  "offGradeReason": string|null
+}
+isOffGradeは、形の不揃い・傷・変色・サイズのばらつきなど、規格外(訳あり品)に見える場合にtrueにしてください。
+JSON以外の文字は出力しないでください。`
+  } else if (mode === 'listing') {
+    prompt = `次の日本語の自然文から、生産者の出品内容をJSONで抽出してください。
 今日の日付(日本時間)は ${todayJst} です。「明日」「明後日」「今週中」のような相対的な日付表現は、この日付を基準にYYYY-MM-DD形式の絶対日付に変換してください。
 入力: "${text}"
 既知の品目候補: ${items.join('、') || 'なし'}
@@ -46,7 +68,8 @@ export default async function handler(req, res) {
   "offGradeReason": string|null
 }
 JSON以外の文字は出力しないでください。`
-    : `次の日本語の自然文から、飲食店の仕入れ希望条件をJSONで抽出してください。
+  } else {
+    prompt = `次の日本語の自然文から、飲食店の仕入れ希望条件をJSONで抽出してください。
 今日の日付(日本時間)は ${todayJst} です。「明日」「明後日」「今週中」のような相対的な日付表現は、この日付を基準にYYYY-MM-DD形式の絶対日付に変換してください。
 入力: "${text}"
 既知の品目候補: ${items.join('、') || 'なし'}
@@ -61,10 +84,16 @@ JSON以外の文字は出力しないでください。`
   "priceLimit": number|null
 }
 JSON以外の文字は出力しないでください。`
+  }
 
   // モデル名は世代交代が早いため決め打ちにせず、環境変数GEMINI_MODELで上書きできるようにする。
-  // 未設定の場合のみ既定値を使う(Google AI Studioの現行モデル一覧で要確認)。
+  // 未設定の場合のみ既定値を使う(Google AI Studioの現行モデル一覧で要確認。画像入力にも対応している必要がある)。
   const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite'
+
+  const parts = [{ text: prompt }]
+  if (mode === 'listing-photo') {
+    parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } })
+  }
 
   try {
     const r = await fetch(
@@ -73,7 +102,7 @@ JSON以外の文字は出力しないでください。`
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          contents: [{ parts }],
           generationConfig: { temperature: 0, responseMimeType: 'application/json' }
         })
       }
@@ -83,10 +112,10 @@ JSON以外の文字は出力しないでください。`
     const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text
     if (!raw) throw new Error('empty gemini response')
     const parsed = JSON.parse(raw)
-    res.status(200).json({ rawText: text, ...parsed })
+    res.status(200).json({ rawText: text || null, ...parsed })
   } catch (e) {
     // Vercelのダッシュボード/`vercel logs`で原因を追えるように、失敗時は必ずサーバー側へ記録する。
-    console.error(`[api/parse] gemini call failed (model=${model}):`, e)
+    console.error(`[api/parse] gemini call failed (model=${model}, mode=${mode}):`, e)
     res.status(502).json({ error: 'ai parse failed', detail: String(e) })
   }
 }

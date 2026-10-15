@@ -219,6 +219,7 @@ body {
   text-align: center;
 }
 .ghost-btn:hover { background: var(--surface); }
+.photo-capture-btn { display: inline-block; box-sizing: border-box; }
 
 .panel {
   background: var(--surface);
