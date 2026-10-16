@@ -20,7 +20,8 @@ function pathFor(id) {
 }
 
 async function readListing(pathname) {
-  const result = await get(pathname, { access: 'private' })
+  // useCache:falseでCDNキャッシュを経由させず常に最新を読む(在庫の正しさに直結するため)。
+  const result = await get(pathname, { access: 'private', useCache: false })
   if (!result) return null
   const text = await new Response(result.stream).text()
   return JSON.parse(text)

@@ -16,11 +16,15 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  producers: any[],
  *  producersLoading: boolean,
  *  producersError: string|null,
+ *  myOrders: any[],
+ *  incomingOrders: any[],
+ *  ordersLoading: boolean,
+ *  ordersError: string|null,
+ *  orderSubmitting: boolean,
  *  requestText: string,
  *  parsed: {item:string,quantity:number,unit:string,neededDate:string,region:string,allowOffGrade:boolean,priceLimit:number|null,source:string}|null,
  *  result: any|null,
  *  resultSnapshot: any[]|null,
- *  savedPlans: any[],
  *  listingDraft: {item:string,availableDate:string,region:string,quantity?:number|null,unit?:string,unitPrice?:number|null,isOffGrade?:boolean,offGradeReason?:string,source?:string}|null,
  *  listingStep: 2|3,
  *  listingText: string,
@@ -44,7 +48,7 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, screen: 'home' }
+      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, screen: 'home' }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
@@ -63,19 +67,23 @@ function loadState() {
     producersError: null,
     listingSubmitting: false,
     listingSubmitError: null,
+    myOrders: [],
+    incomingOrders: [],
+    ordersLoading: true,
+    ordersError: null,
+    orderSubmitting: false,
     requestText: buildDefaultRequestText(),
     parsed: null,
     result: null,
-    resultSnapshot: null,
-    savedPlans: []
+    resultSnapshot: null
   }
 }
 
 function saveState() {
   try {
-    // flashMessageは一時的なUI通知、producers関連はサーバーが正、listingSubmit*は送信中フラグなので、
+    // flashMessageは一時的なUI通知、producers/orders関連はサーバーが正、*Submitting等は送信中フラグなので、
     // いずれも保存対象から除く(保存すると、例えば送信中のまま再読み込みした際に固まって見える)。
-    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, ...persisted } = state
+    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, myOrders, incomingOrders, ordersLoading, ordersError, orderSubmitting, ...persisted } = state
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted))
   } catch (e) { /* 保存できなくても画面表示は継続する */ }
 }
@@ -188,6 +196,25 @@ async function fetchListings() {
     setState({ producers: listings, producersLoading: false, producersError: null })
   } catch (e) {
     setState({ producersLoading: false, producersError: '出品データの取得に失敗しました。通信状況を確認して、再読み込みしてください。' })
+  }
+}
+
+// 自分が依頼した注文(飲食店視点)と、自分の農家宛に届いた依頼(生産者視点)の両方を取得する。
+// 同じ端末で両方の役割を試せるデモ的な使い方も踏まえ、常に両方フェッチする。
+async function fetchOrders() {
+  setState({ ordersLoading: true })
+  const deviceId = getDeviceId()
+  try {
+    const [mineRes, incomingRes] = await Promise.all([
+      fetch(`/api/orders?role=restaurant&ownerId=${encodeURIComponent(deviceId)}`),
+      fetch(`/api/orders?role=producer&ownerId=${encodeURIComponent(deviceId)}`)
+    ])
+    if (!mineRes.ok || !incomingRes.ok) throw new Error('api not ok')
+    const mine = await mineRes.json()
+    const incoming = await incomingRes.json()
+    setState({ myOrders: mine.orders, incomingOrders: incoming.orders, ordersLoading: false, ordersError: null })
+  } catch (e) {
+    setState({ ordersLoading: false, ordersError: '注文データの取得に失敗しました。通信状況を確認して、再読み込みしてください。' })
   }
 }
 
@@ -355,10 +382,46 @@ function handleRecomputeClick() {
   setState({ result: { ...result, diffNotices }, resultSnapshot: snapshot })
 }
 
-function handleSavePlan() {
-  if (!state.result || state.result.status !== 'success') return
-  const plan = { ...state.result, savedAt: new Date().toISOString(), requestSummary: state.requestText }
-  setState({ savedPlans: [...state.savedPlans, plan] })
+// 仕入れ案を実際の依頼として生産者に送る。複数農家にまたがる場合は農家ごとにlineとして
+// 送り、承認/却下は各農家が自分のlineにだけ行う(api/orders.js参照)。送信後はstate.result.orderId
+// を記録してボタンを「依頼済み」表示にし、二重送信を防ぐ。
+async function handleRequestOrder() {
+  const r = state.result
+  if (!r || r.status !== 'success' || r.orderId) return
+  setState({ orderSubmitting: true })
+  const payload = {
+    requesterId: getDeviceId(),
+    requesterName: state.restaurantProfile?.storeName || '',
+    neededDate: r.neededDate,
+    unit: r.allocation[0]?.farm.unit || 'kg',
+    totalQuantity: r.totalQuantity,
+    totalPrice: r.totalPrice,
+    lines: r.allocation.map(a => ({
+      listingId: a.farm.id,
+      ownerId: a.farm.ownerId,
+      farmName: a.farm.farmName,
+      item: a.farm.item,
+      amount: a.amount,
+      unitPrice: a.farm.unitPrice
+    }))
+  }
+  try {
+    const res = await fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!res.ok) throw new Error('api not ok')
+    const { order } = await res.json()
+    showFlash('仕入れを依頼しました。生産者の承認をお待ちください', {
+      result: { ...r, orderId: order.id },
+      myOrders: [...state.myOrders, order],
+      orderSubmitting: false
+    })
+  } catch (e) {
+    setState({ orderSubmitting: false })
+    showFlash('仕入れ依頼の送信に失敗しました。通信状況を確認してもう一度お試しください。')
+  }
 }
 
 // おまかせ救済タブで選んだ出品をそのまま仕入れ案にする。品目を問わないおまかせ提案から
@@ -435,6 +498,48 @@ async function handleProducerDelete(id) {
     setState({ producers: state.producers.filter(p => p.id !== id) })
   } catch (e) {
     showFlash('出品の削除に失敗しました。通信状況を確認してください。')
+  }
+}
+
+// 生産者が自分の農家のline(listingId)にだけ承認/却下できる。承認すると、該当出品の
+// quantityがサーバー側で減る(api/orders.js参照)ため、成功時はproducersも更新し直す。
+async function handleOrderLineRespond(orderId, listingId, status) {
+  const prev = state.incomingOrders
+  setState({
+    incomingOrders: prev.map(o => o.id === orderId
+      ? { ...o, lines: o.lines.map(l => l.listingId === listingId ? { ...l, status } : l) }
+      : o)
+  })
+  try {
+    const res = await fetch(`/api/orders?id=${encodeURIComponent(orderId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ownerId: getDeviceId(), listingId, status })
+    })
+    if (!res.ok) {
+      setState({ incomingOrders: prev })
+      showFlash(res.status === 403 ? 'この依頼は自分の出品ではないため操作できません' : '承認/却下の送信に失敗しました。通信状況を確認してください。')
+      return
+    }
+    showFlash(status === 'accepted' ? '仕入れ依頼を承認しました' : '仕入れ依頼を却下しました')
+    if (status === 'accepted') fetchListings() // 在庫が減っているはずなので出品一覧も最新化する
+  } catch (e) {
+    setState({ incomingOrders: prev })
+    showFlash('承認/却下の送信に失敗しました。通信状況を確認してください。')
+  }
+}
+
+async function handleOrderCancel(orderId) {
+  if (!window.confirm('この仕入れ依頼を取り消します。よろしいですか？')) return
+  try {
+    const res = await fetch(`/api/orders?id=${encodeURIComponent(orderId)}&ownerId=${encodeURIComponent(getDeviceId())}`, { method: 'DELETE' })
+    if (!res.ok) {
+      showFlash('依頼の取り消しに失敗しました。通信状況を確認してください。')
+      return
+    }
+    setState({ myOrders: state.myOrders.filter(o => o.id !== orderId) })
+  } catch (e) {
+    showFlash('依頼の取り消しに失敗しました。通信状況を確認してください。')
   }
 }
 
@@ -634,6 +739,7 @@ function activeNavKey() {
   if (state.screen === 'restaurant' || state.screen === 'restaurant-register') return 'restaurant'
   if (state.screen === 'producer' || state.screen === 'producer-register') return 'producer'
   if (state.screen === 'rescue') return 'rescue'
+  if (state.screen === 'orders') return 'orders'
   if (state.screen === 'records') return 'records'
   if (state.screen === 'settings') return 'settings'
   return 'home'
@@ -654,6 +760,7 @@ function renderSidebar() {
         ${item('restaurant', '🛒', '仕入れ')}
         ${item('rescue', '⏰', 'おまかせ救済')}
         ${item('producer', '🌱', '出品')}
+        ${item('orders', '📦', '注文')}
         ${item('records', '📖', '記録')}
         ${item('settings', '⚙️', '設定')}
       </div>
@@ -672,6 +779,7 @@ function renderScreen() {
     case 'restaurant': return `<div class="role-restaurant">${renderRestaurant()}</div>`
     case 'rescue': return `<div class="role-restaurant">${renderRescue()}</div>`
     case 'producer': return `<div class="role-producer">${renderProducer()}</div>`
+    case 'orders': return renderOrders()
     case 'records': return renderRecords()
     case 'settings': return renderSettings()
     default: return renderHome()
@@ -872,7 +980,6 @@ function renderRestaurant() {
 
     ${state.parsed ? renderParsedForm() : ''}
     ${state.result ? renderResult() : ''}
-    ${state.savedPlans.length ? renderSavedPlans() : ''}
   `
 }
 
@@ -983,12 +1090,46 @@ function renderResult() {
         </div>
       </div>
       ${renderResultMapSection(r)}
-      <p class="status-note">状態:農家承認前・在庫未確保。この案は注文確定ではありません。</p>
-      <div class="actions">
-        <button id="recompute-btn">在庫の最新状態で再計算</button>
-        <button id="save-plan-btn" class="primary">案を保存(相談用)</button>
-      </div>
+      ${renderOrderRequestSection(r)}
+      ${r.orderId ? '' : `
+        <div class="actions">
+          <button id="recompute-btn">在庫の最新状態で再計算</button>
+        </div>
+      `}
     </section>
+  `
+}
+
+// 注文全体の状態は保存せず、常にlinesから導出する(別フィールドでの二重管理を避けるため)。
+function summarizeOrderStatus(order) {
+  const statuses = order.lines.map(l => l.status)
+  if (statuses.every(s => s === 'accepted')) return { label: '確定(全農家が承認済み)', tone: 'ok' }
+  if (statuses.some(s => s === 'rejected')) return { label: '一部却下あり(内容をご確認ください)', tone: 'urgent' }
+  return { label: '生産者の承認待ち', tone: 'soon' }
+}
+
+function renderOrderRequestSection(r) {
+  if (!r.orderId) {
+    return `
+      <p class="status-note">状態:農家承認前・在庫未確保。依頼すると生産者の承認待ちになります。</p>
+      <div class="actions">
+        <button id="request-order-btn" class="primary" ${state.orderSubmitting ? 'disabled' : ''}>${state.orderSubmitting ? '依頼しています…' : 'この内容で仕入れを依頼する'}</button>
+      </div>
+    `
+  }
+  const order = state.myOrders.find(o => o.id === r.orderId)
+  if (!order) {
+    return `<p class="status-note">状態:依頼済み(読み込み中…)</p>`
+  }
+  const summary = summarizeOrderStatus(order)
+  return `
+    <p class="status-note">状態:<span class="freshness-badge freshness-${summary.tone}">${escapeHtml(summary.label)}</span></p>
+    <ul class="order-line-list">
+      ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}:${
+        l.status === 'accepted' ? '承認済み' : l.status === 'rejected' ? '却下' : '承認待ち'
+      }</li>`).join('')}
+    </ul>
+    <p class="hint">依頼の状況は「注文」タブでも確認できます。</p>
   `
 }
 
@@ -1014,19 +1155,6 @@ function renderExclusions(exclusions) {
         ${exclusions.map(e => `<li>${escapeHtml(e.farm.farmName)}:${escapeHtml(e.reason)}</li>`).join('')}
       </ul>
     </details>
-  `
-}
-
-function renderSavedPlans() {
-  return `
-    <section class="panel">
-      <h2>⑤ 保存済みの仕入れ案(相談用)</h2>
-      <ul class="saved-list">
-        ${state.savedPlans.map(p => `
-          <li>${new Date(p.savedAt).toLocaleString('ja-JP')} - ${fmtNum(p.totalQuantity)}(合計${fmtNum(p.totalPrice)}円) - 「${escapeHtml(p.requestSummary)}」</li>
-        `).join('')}
-      </ul>
-    </section>
   `
 }
 
@@ -1203,14 +1331,106 @@ function renderRecords() {
   return `
     <section class="panel">
       <h2>記録</h2>
-      <p class="hint">保存した仕入れ案と、登録されている生産者の出品状況をまとめて確認できます。</p>
+      <p class="hint">依頼した仕入れの状況は「📦 注文」タブでご確認いただけます。ここでは登録されている生産者の出品状況をまとめて確認できます。</p>
     </section>
-    ${state.savedPlans.length ? renderSavedPlans() : '<section class="panel"><p class="hint">保存済みの仕入れ案はまだありません。②の「仕入れ案を作る」で成立案を保存するとここに表示されます。</p></section>'}
     <section class="panel">
       <h3>登録済みの生産者出品一覧</h3>
       ${renderProducersStatus()}
       ${renderProducerTable()}
     </section>
+  `
+}
+
+// 注文(orders)もlistingsと同じく全端末共有で取得する。読み込み中・失敗時の表示と
+// 手動更新ボタンはrenderProducersStatus()と同じ作法。
+function renderOrdersStatus() {
+  if (state.ordersLoading) return `<p class="hint">注文データを読み込み中…</p>`
+  if (state.ordersError) {
+    return `<p class="warn">${escapeHtml(state.ordersError)} <button type="button" data-refresh-orders class="table-btn">再読み込み</button></p>`
+  }
+  return `<div class="actions"><button type="button" data-refresh-orders class="ghost-btn">🔄 最新の状態に更新</button></div>`
+}
+
+function renderOrders() {
+  const role = state.lastRole
+  if (!role) {
+    return `
+      <section class="panel">
+        <h2>注文</h2>
+        <p class="hint">「仕入れ」または「出品」を一度開くと、その役割の注文状況だけがここに表示されます。</p>
+        ${renderSettingsSwitch()}
+      </section>
+    `
+  }
+  return role === 'restaurant' ? renderMyOrders() : renderIncomingOrders()
+}
+
+function renderOrderLineLabel(status) {
+  return status === 'accepted' ? '承認済み' : status === 'rejected' ? '却下' : '承認待ち'
+}
+
+function renderMyOrders() {
+  return `
+    <section class="panel">
+      <h2>依頼した仕入れ</h2>
+      ${renderOrdersStatus()}
+      ${state.myOrders.length === 0
+        ? `<p class="hint">まだ仕入れを依頼していません。「仕入れ」タブの④で仕入れ案を作ると依頼できます。</p>`
+        : `<div class="order-grid">${state.myOrders.slice().reverse().map(renderMyOrderCard).join('')}</div>`}
+    </section>
+  `
+}
+
+function renderMyOrderCard(order) {
+  const summary = summarizeOrderStatus(order)
+  const cancellable = order.lines.every(l => l.status === 'pending')
+  return `
+    <div class="order-card">
+      <div class="order-card-head">
+        <span class="freshness-badge freshness-${summary.tone}">${escapeHtml(summary.label)}</span>
+        <span class="hint">${new Date(order.createdAt).toLocaleString('ja-JP')}</span>
+      </div>
+      <ul class="order-line-list">
+        ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}(${fmtNum(l.amount * l.unitPrice)}円):${renderOrderLineLabel(l.status)}</li>`).join('')}
+      </ul>
+      <div class="order-total">合計 ${fmtNum(order.totalQuantity)}${escapeHtml(order.unit)}・${fmtNum(order.totalPrice)}円</div>
+      ${cancellable ? `<div class="actions"><button type="button" data-order-cancel="${order.id}" class="table-btn table-btn-danger">依頼を取り消す</button></div>` : ''}
+    </div>
+  `
+}
+
+function renderIncomingOrders() {
+  const deviceId = getDeviceId()
+  return `
+    <section class="panel">
+      <h2>届いた仕入れ依頼</h2>
+      ${renderOrdersStatus()}
+      ${state.incomingOrders.length === 0
+        ? `<p class="hint">まだ仕入れ依頼は届いていません。</p>`
+        : `<div class="order-grid">${state.incomingOrders.slice().reverse().map(o => renderIncomingOrderCard(o, deviceId)).join('')}</div>`}
+    </section>
+  `
+}
+
+function renderIncomingOrderCard(order, deviceId) {
+  return `
+    <div class="order-card">
+      <div class="order-card-head">
+        <span class="hint">${escapeHtml(order.requesterName || '飲食店')}より・${new Date(order.createdAt).toLocaleString('ja-JP')}</span>
+      </div>
+      <ul class="order-line-list">
+        ${order.lines.map(l => {
+          const mine = l.ownerId === deviceId
+          const label = mine && l.status === 'pending'
+            ? `<span class="order-line-actions">
+                <button type="button" data-order-respond data-order-id="${order.id}" data-listing-id="${l.listingId}" data-status="accepted" class="table-btn">承認</button>
+                <button type="button" data-order-respond data-order-id="${order.id}" data-listing-id="${l.listingId}" data-status="rejected" class="table-btn table-btn-danger">却下</button>
+              </span>`
+            : `:${renderOrderLineLabel(l.status)}${mine ? '' : '(他の農家の出品)'}`
+          return `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}(${fmtNum(l.amount * l.unitPrice)}円)${label}</li>`
+        }).join('')}
+      </ul>
+    </div>
   `
 }
 
@@ -1305,6 +1525,7 @@ function attachEvents() {
       const key = btn.dataset.nav
       // 仕入れ・出品・おまかせ救済・記録は他端末の出品状況に関わる画面なので、開くたびに最新化する。
       if (['restaurant', 'producer', 'rescue', 'records'].includes(key)) fetchListings()
+      if (['restaurant', 'producer', 'orders'].includes(key)) fetchOrders()
       if (key === 'restaurant') goToRestaurant()
       else if (key === 'producer') goToProducer()
       else setState({ screen: key })
@@ -1312,6 +1533,15 @@ function attachEvents() {
   })
   document.querySelectorAll('[data-refresh-listings]').forEach(btn => {
     btn.addEventListener('click', () => fetchListings())
+  })
+  document.querySelectorAll('[data-refresh-orders]').forEach(btn => {
+    btn.addEventListener('click', () => fetchOrders())
+  })
+  document.querySelectorAll('[data-order-respond]').forEach(btn => {
+    btn.addEventListener('click', () => handleOrderLineRespond(btn.dataset.orderId, btn.dataset.listingId, btn.dataset.status))
+  })
+  document.querySelectorAll('[data-order-cancel]').forEach(btn => {
+    btn.addEventListener('click', () => handleOrderCancel(btn.dataset.orderCancel))
   })
   document.querySelectorAll('[data-goto]').forEach(btn => {
     btn.addEventListener('click', () => setState({ screen: btn.dataset.goto }))
@@ -1373,7 +1603,7 @@ function attachEvents() {
   document.getElementById('request-voice-btn')?.addEventListener('click', () => startVoiceInput('request-text', 'request-voice-msg'))
   document.getElementById('compute-btn')?.addEventListener('click', handleComputeClick)
   document.getElementById('recompute-btn')?.addEventListener('click', handleRecomputeClick)
-  document.getElementById('save-plan-btn')?.addEventListener('click', handleSavePlan)
+  document.getElementById('request-order-btn')?.addEventListener('click', handleRequestOrder)
   document.getElementById('toggle-result-map')?.addEventListener('click', () => setState({ showResultMap: !state.showResultMap }))
   document.querySelectorAll('[data-rescue-adopt]').forEach(btn => {
     btn.addEventListener('click', () => handleRescueAdopt(btn.dataset.rescueAdopt))
@@ -1412,3 +1642,4 @@ function attachEvents() {
 
 render()
 fetchListings()
+fetchOrders()
