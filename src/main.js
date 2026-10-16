@@ -24,6 +24,10 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  amendingLineKey: string|null,
  *  hubs: any[],
  *  showNewHubForm: boolean,
+ *  userEmail: string|null,
+ *  authSubmitting: boolean,
+ *  authLinkSent: boolean,
+ *  authError: string|null,
  *  requestText: string,
  *  parsed: {item:string,quantity:number,unit:string,neededDate:string,region:string,allowOffGrade:boolean,priceLimit:number|null,source:string}|null,
  *  result: any|null,
@@ -51,7 +55,7 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, hubs: [], showNewHubForm: false, screen: 'home' }
+      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, hubs: [], showNewHubForm: false, userEmail: getUserEmail(), authSubmitting: false, authLinkSent: false, authError: null, screen: 'home' }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
@@ -78,6 +82,10 @@ function loadState() {
     amendingLineKey: null,
     hubs: [],
     showNewHubForm: false,
+    userEmail: getUserEmail(),
+    authSubmitting: false,
+    authLinkSent: false,
+    authError: null,
     requestText: buildDefaultRequestText(),
     parsed: null,
     result: null,
@@ -89,7 +97,7 @@ function saveState() {
   try {
     // flashMessageは一時的なUI通知、producers/orders関連はサーバーが正、*Submitting等は送信中フラグなので、
     // いずれも保存対象から除く(保存すると、例えば送信中のまま再読み込みした際に固まって見える)。
-    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, myOrders, incomingOrders, ordersLoading, ordersError, orderSubmitting, amendingLineKey, hubs, showNewHubForm, ...persisted } = state
+    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, myOrders, incomingOrders, ordersLoading, ordersError, orderSubmitting, amendingLineKey, hubs, showNewHubForm, authSubmitting, authLinkSent, authError, ...persisted } = state
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted))
   } catch (e) { /* 保存できなくても画面表示は継続する */ }
 }
@@ -217,6 +225,28 @@ function getDeviceId() {
   }
 }
 
+// ログイン(マジックリンク)していればそのメールアドレスを、していなければ端末の匿名UUIDを
+// 所有権(ownerId)として使う。api側はUUIDかメールかを区別しないため、ログインは
+// 「ownerIdとして使う値を切り替えるだけ」で完結する(api/auth.jsのコメント参照)。
+// 既知の制約: ログイン前にUUIDで作成した出品・注文は、ログイン後はその端末からも
+// 編集・削除できなくなる(自動移行は今回のスコープ外)。
+const USER_EMAIL_KEY = 'ai-chiikishosha-user-email'
+function getOwnerId() {
+  try {
+    return localStorage.getItem(USER_EMAIL_KEY) || getDeviceId()
+  } catch (e) {
+    return getDeviceId()
+  }
+}
+
+function getUserEmail() {
+  try {
+    return localStorage.getItem(USER_EMAIL_KEY)
+  } catch (e) {
+    return null
+  }
+}
+
 async function fetchListings() {
   setState({ producersLoading: true, producersError: null })
   try {
@@ -233,7 +263,7 @@ async function fetchListings() {
 // 同じ端末で両方の役割を試せるデモ的な使い方も踏まえ、常に両方フェッチする。
 async function fetchOrders() {
   setState({ ordersLoading: true })
-  const deviceId = getDeviceId()
+  const deviceId = getOwnerId()
   try {
     const [mineRes, incomingRes] = await Promise.all([
       fetch(`/api/orders?role=restaurant&ownerId=${encodeURIComponent(deviceId)}`),
@@ -265,7 +295,7 @@ async function handleCreateHub(name, address) {
     const res = await fetch('/api/hubs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, address, createdBy: getDeviceId() })
+      body: JSON.stringify({ name, address, createdBy: getOwnerId() })
     })
     if (!res.ok) throw new Error('api not ok')
     const { hub } = await res.json()
@@ -292,6 +322,53 @@ async function handleNewHubSubmit() {
   if (hub) {
     setState({ showNewHubForm: false })
     showFlash(`拠点「${hub.name}」を登録しました。一覧から選んでください`)
+  }
+}
+
+// メールアドレスにワンタイムログインリンクを送る。パスワードは扱わない
+// (api/auth.jsのコメント参照)。
+async function handleAuthRequestLink(email) {
+  setState({ authSubmitting: true, authError: null })
+  try {
+    const res = await fetch('/api/auth?action=request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    })
+    if (!res.ok) throw new Error('api not ok')
+    setState({ authSubmitting: false, authLinkSent: true })
+  } catch (e) {
+    setState({ authSubmitting: false, authError: 'ログインリンクの送信に失敗しました。メールアドレスをご確認のうえ、もう一度お試しください。' })
+  }
+}
+
+function handleAuthLogout() {
+  try { localStorage.removeItem(USER_EMAIL_KEY) } catch (e) { /* no-op */ }
+  setState({ userEmail: null, authLinkSent: false, authError: null })
+  // ログイン状態(=ownerId)が変わったので、自分の出品・注文一覧を取り直す。
+  fetchListings()
+  fetchOrders()
+}
+
+// 起動時、メール内のログインリンク(?loginToken=...)を踏んでいればログイン状態にする。
+async function handleAuthTokenFromUrl() {
+  const token = new URLSearchParams(window.location.search).get('loginToken')
+  if (!token) return
+  window.history.replaceState(null, '', window.location.pathname) // トークンをURL・履歴から消す
+  try {
+    const res = await fetch('/api/auth?action=verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token })
+    })
+    if (!res.ok) throw new Error('api not ok')
+    const { email } = await res.json()
+    localStorage.setItem(USER_EMAIL_KEY, email)
+    showFlash(`${email} でログインしました`, { userEmail: email })
+    fetchListings()
+    fetchOrders()
+  } catch (e) {
+    showFlash('ログインリンクが無効か、有効期限が切れています。もう一度お試しください。')
   }
 }
 
@@ -468,7 +545,7 @@ async function handleRequestOrder() {
   setState({ orderSubmitting: true })
   const deadlineHours = document.getElementById('order-deadline-select')?.value || '4'
   const payload = {
-    requesterId: getDeviceId(),
+    requesterId: getOwnerId(),
     requesterName: state.restaurantProfile?.storeName || '',
     neededDate: r.neededDate,
     unit: r.allocation[0]?.farm.unit || 'kg',
@@ -546,7 +623,7 @@ async function patchListing(id, patch) {
     const res = await fetch(`/api/listings?id=${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ownerId: getDeviceId(), ...patch })
+      body: JSON.stringify({ ownerId: getOwnerId(), ...patch })
     })
     if (!res.ok) {
       setState({ producers: prev })
@@ -574,7 +651,7 @@ async function handleProducerDelete(id) {
   const label = target ? `${target.farmName}・${target.item}(${fmtNum(target.quantity)}${target.unit})` : 'この出品'
   if (!window.confirm(`${label}を削除します。元に戻せません。よろしいですか？`)) return
   try {
-    const res = await fetch(`/api/listings?id=${encodeURIComponent(id)}&ownerId=${encodeURIComponent(getDeviceId())}`, { method: 'DELETE' })
+    const res = await fetch(`/api/listings?id=${encodeURIComponent(id)}&ownerId=${encodeURIComponent(getOwnerId())}`, { method: 'DELETE' })
     if (!res.ok) {
       showFlash(res.status === 403 ? 'この出品は別の端末で登録されたため削除できません' : '出品の削除に失敗しました。通信状況を確認してください。')
       return
@@ -598,7 +675,7 @@ async function handleOrderLineRespond(orderId, listingId, status) {
     const res = await fetch(`/api/orders?id=${encodeURIComponent(orderId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ownerId: getDeviceId(), listingId, status })
+      body: JSON.stringify({ ownerId: getOwnerId(), listingId, status })
     })
     if (!res.ok) {
       showFlash(
@@ -620,7 +697,7 @@ async function handleOrderLineRespond(orderId, listingId, status) {
 async function handleOrderCancel(orderId) {
   if (!window.confirm('この仕入れ依頼を取り消します。よろしいですか？')) return
   try {
-    const res = await fetch(`/api/orders?id=${encodeURIComponent(orderId)}&ownerId=${encodeURIComponent(getDeviceId())}`, { method: 'DELETE' })
+    const res = await fetch(`/api/orders?id=${encodeURIComponent(orderId)}&ownerId=${encodeURIComponent(getOwnerId())}`, { method: 'DELETE' })
     if (!res.ok) {
       showFlash('依頼の取り消しに失敗しました。通信状況を確認してください。')
       return
@@ -659,7 +736,7 @@ async function handleOrderLineAmendSubmit(orderId, listingId, form) {
     const res = await fetch(`/api/orders?id=${encodeURIComponent(orderId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ownerId: getDeviceId(), listingId, action: 'amend', newAmount, reason })
+      body: JSON.stringify({ ownerId: getOwnerId(), listingId, action: 'amend', newAmount, reason })
     })
     if (!res.ok) {
       setState({ incomingOrders: prev })
@@ -797,7 +874,7 @@ async function handleListingStepThreeSubmit(form) {
   const hub = state.hubs.find(h => h.id === hubId)
 
   const payload = {
-    ownerId: getDeviceId(),
+    ownerId: getOwnerId(),
     farmName: state.producerProfile?.farmName || '新規農家',
     lat: state.producerProfile?.lat ?? null,
     lng: state.producerProfile?.lng ?? null,
@@ -1630,7 +1707,7 @@ function renderMyOrderCard(order) {
 }
 
 function renderIncomingOrders() {
-  const deviceId = getDeviceId()
+  const deviceId = getOwnerId()
   return `
     <section class="panel">
       <h2>届いた仕入れ依頼</h2>
@@ -1713,6 +1790,43 @@ function renderDisplaySettingsCard() {
   `
 }
 
+// メールアドレス+ワンタイムログインリンクでのログイン(パスワードは扱わない)。
+// ログインすると、端末の匿名UUIDの代わりにこのメールアドレスを所有権(ownerId)として使う。
+function renderAccountCard() {
+  if (state.userEmail) {
+    return `
+      <section class="panel">
+        <h3>アカウント</h3>
+        <p class="hint">ログイン中:<strong>${escapeHtml(state.userEmail)}</strong></p>
+        <p class="hint">この端末で作成した出品・注文は、このメールアドレスでどの端末からでも管理できます。</p>
+        <div class="actions"><button id="auth-logout-btn">ログアウトする</button></div>
+      </section>
+    `
+  }
+  if (state.authLinkSent) {
+    return `
+      <section class="panel">
+        <h3>アカウント</h3>
+        <p class="hint">✉️ ログインリンクを送信しました。メール内のリンクを開いてください(15分間だけ有効です)。</p>
+        <div class="actions"><button id="auth-link-resend-btn" class="ghost-btn">別のメールアドレスで送り直す</button></div>
+      </section>
+    `
+  }
+  return `
+    <section class="panel">
+      <h3>アカウント</h3>
+      <p class="hint">メールアドレスを登録すると、機種変更やブラウザのデータ削除があっても、別の端末から自分の出品・注文にアクセスできるようになります(パスワードは不要です)。</p>
+      <form id="auth-request-form" class="form-grid">
+        <label>メールアドレス<input type="email" name="email" required placeholder="例:mikami@example.com" /></label>
+      </form>
+      ${state.authError ? `<p class="warn">${escapeHtml(state.authError)}</p>` : ''}
+      <div class="actions">
+        <button id="auth-request-submit" class="primary" ${state.authSubmitting ? 'disabled' : ''}>${state.authSubmitting ? '送信しています…' : 'ログインリンクを送る'}</button>
+      </div>
+    </section>
+  `
+}
+
 function renderSettings() {
   const role = state.lastRole
 
@@ -1724,6 +1838,7 @@ function renderSettings() {
         ${renderSettingsSwitch()}
       </section>
       ${renderDisplaySettingsCard()}
+      ${renderAccountCard()}
     `
   }
 
@@ -1747,6 +1862,7 @@ function renderSettings() {
         <div class="actions"><button data-goto="restaurant-register" class="primary">${r ? '編集する' : '設定する'}</button></div>
       </section>
       ${renderDisplaySettingsCard()}
+      ${renderAccountCard()}
     `
   }
 
@@ -1768,6 +1884,7 @@ function renderSettings() {
       <div class="actions"><button data-goto="producer-register" class="primary">${p ? '編集する' : '登録する'}</button></div>
     </section>
     ${renderDisplaySettingsCard()}
+      ${renderAccountCard()}
   `
 }
 
@@ -1812,6 +1929,15 @@ function attachEvents() {
   })
   document.getElementById('new-hub-toggle')?.addEventListener('click', handleNewHubToggle)
   document.getElementById('new-hub-submit')?.addEventListener('click', handleNewHubSubmit)
+  document.getElementById('auth-request-submit')?.addEventListener('click', (e) => {
+    e.preventDefault()
+    const form = document.getElementById('auth-request-form')
+    if (!form.reportValidity()) return
+    const email = new FormData(form).get('email')
+    handleAuthRequestLink(String(email || '').trim())
+  })
+  document.getElementById('auth-link-resend-btn')?.addEventListener('click', () => setState({ authLinkSent: false }))
+  document.getElementById('auth-logout-btn')?.addEventListener('click', handleAuthLogout)
   document.querySelectorAll('[data-goto]').forEach(btn => {
     btn.addEventListener('click', () => setState({ screen: btn.dataset.goto }))
   })
@@ -1913,3 +2039,4 @@ render()
 fetchListings()
 fetchOrders()
 fetchHubs()
+handleAuthTokenFromUrl()
