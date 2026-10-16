@@ -43,7 +43,8 @@ async function seedIfEmpty() {
   await Promise.all(
     demo.map((p) => {
       // デモのA/B/C農家は「共通受渡拠点」想定(元々の03spec.mdのデモ設定)なので、既定はpickupにする。
-      const listing = { ...p, ownerId: SEED_OWNER, deliveryMethod: 'pickup', expiryDate: computeExpiryDate(p.availableDate, p.item) }
+      // また、すぐ仕入れられるデモ用在庫として扱うためconfirmed(収穫済み・在庫確定)にする。
+      const listing = { ...p, ownerId: SEED_OWNER, deliveryMethod: 'pickup', stockStatus: 'confirmed', expiryDate: computeExpiryDate(p.availableDate, p.item) }
       return put(pathFor(p.id), JSON.stringify(listing), {
         access: 'private',
         addRandomSuffix: false,
@@ -70,6 +71,7 @@ export default async function handler(req, res) {
       if (typeof body.item !== 'string' || !body.item) { res.status(400).json({ error: 'item is required' }); return }
       if (typeof body.quantity !== 'number' || !(body.quantity > 0)) { res.status(400).json({ error: 'quantity must be a positive number' }); return }
       if (!['deliver', 'pickup'].includes(body.deliveryMethod)) { res.status(400).json({ error: 'deliveryMethod must be deliver or pickup' }); return }
+      if (!['confirmed', 'estimated'].includes(body.stockStatus)) { res.status(400).json({ error: 'stockStatus must be confirmed or estimated' }); return }
 
       const id = `L${Date.now()}${Math.random().toString(36).slice(2, 8)}`
       const listing = {
@@ -86,6 +88,7 @@ export default async function handler(req, res) {
         unitPrice: Number(body.unitPrice || 0),
         isOffGrade: !!body.isOffGrade,
         offGradeReason: String(body.offGradeReason || ''),
+        stockStatus: body.stockStatus,
         deliveryMethod: body.deliveryMethod,
         deliveryLocation: String(body.deliveryLocation || ''),
         deliveryTime: String(body.deliveryTime || ''),

@@ -389,6 +389,7 @@ async function handleRequestOrder() {
   const r = state.result
   if (!r || r.status !== 'success' || r.orderId) return
   setState({ orderSubmitting: true })
+  const deadlineHours = document.getElementById('order-deadline-select')?.value || '4'
   const payload = {
     requesterId: getDeviceId(),
     requesterName: state.restaurantProfile?.storeName || '',
@@ -396,6 +397,7 @@ async function handleRequestOrder() {
     unit: r.allocation[0]?.farm.unit || 'kg',
     totalQuantity: r.totalQuantity,
     totalPrice: r.totalPrice,
+    responseDeadline: computeResponseDeadline(deadlineHours),
     lines: r.allocation.map(a => ({
       listingId: a.farm.id,
       ownerId: a.farm.ownerId,
@@ -417,7 +419,8 @@ async function handleRequestOrder() {
     })
     if (!res.ok) throw new Error('api not ok')
     const { order } = await res.json()
-    showFlash('仕入れを依頼しました。生産者の承認をお待ちください', {
+    const allConfirmed = order.lines.every(l => l.status === 'accepted')
+    showFlash(allConfirmed ? '在庫確定の出品だったため、その場で仕入れが確定しました！' : '仕入れを依頼しました。生産者の承認をお待ちください', {
       result: { ...r, orderId: order.id },
       myOrders: [...state.myOrders, order],
       orderSubmitting: false
@@ -521,8 +524,12 @@ async function handleOrderLineRespond(orderId, listingId, status) {
       body: JSON.stringify({ ownerId: getDeviceId(), listingId, status })
     })
     if (!res.ok) {
-      setState({ incomingOrders: prev })
-      showFlash(res.status === 403 ? 'この依頼は自分の出品ではないため操作できません' : '承認/却下の送信に失敗しました。通信状況を確認してください。')
+      showFlash(
+        res.status === 403 ? 'この依頼は自分の出品ではないため操作できません'
+        : res.status === 409 ? 'この依頼はすでに処理済み、または期限切れのため操作できません'
+        : '承認/却下の送信に失敗しました。通信状況を確認してください。'
+      )
+      await fetchOrders() // 最新の状態(期限切れ等)を取り直して表示を合わせる
       return
     }
     showFlash(status === 'accepted' ? '仕入れ依頼を承認しました' : '仕入れ依頼を却下しました')
@@ -672,6 +679,7 @@ async function handleListingStepThreeSubmit(form) {
     unitPrice: Number(data.get('unitPrice') || 0),
     isOffGrade: data.get('isOffGrade') === 'on',
     offGradeReason: String(data.get('offGradeReason') || ''),
+    stockStatus: String(data.get('stockStatus') || ''),
     deliveryMethod: String(data.get('deliveryMethod') || ''),
     deliveryLocation: String(data.get('deliveryLocation') || ''),
     deliveryTime: String(data.get('deliveryTime') || ''),
@@ -1130,14 +1138,31 @@ function renderResult() {
 function summarizeOrderStatus(order) {
   const statuses = order.lines.map(l => l.status)
   if (statuses.every(s => s === 'accepted')) return { label: '確定(全農家が承認済み)', tone: 'ok' }
-  if (statuses.some(s => s === 'rejected')) return { label: '一部却下あり(内容をご確認ください)', tone: 'urgent' }
+  if (statuses.some(s => s === 'rejected' || s === 'expired')) return { label: '一部却下・期限切れあり(内容をご確認ください)', tone: 'urgent' }
   return { label: '生産者の承認待ち', tone: 'soon' }
+}
+
+// 返信期限のプリセット(時間単位)。選択値から実時刻(ISO文字列)を計算する。
+const RESPONSE_DEADLINE_PRESETS = [
+  { value: '1', label: '1時間以内' },
+  { value: '4', label: '4時間以内' },
+  { value: '12', label: '本日中(12時間以内)' },
+  { value: '24', label: '明日まで(24時間以内)' }
+]
+function computeResponseDeadline(hours) {
+  return new Date(Date.now() + Number(hours) * 60 * 60 * 1000).toISOString()
 }
 
 function renderOrderRequestSection(r) {
   if (!r.orderId) {
     return `
-      <p class="status-note">状態:農家承認前・在庫未確保。依頼すると生産者の承認待ちになります。</p>
+      <p class="status-note">状態:在庫確定の出品はこの場で即確定します。見込みの出品は生産者の承認待ちになります。</p>
+      <label class="checkbox">見込み品の返信期限
+        <select id="order-deadline-select">
+          ${RESPONSE_DEADLINE_PRESETS.map(p => `<option value="${p.value}" ${p.value === '4' ? 'selected' : ''}>${p.label}</option>`).join('')}
+        </select>
+      </label>
+      <p class="hint">期限を過ぎても生産者から返事が無い場合、自動的に「期限切れ」としてキャンセルされます。いつまでも待たされることはありません。</p>
       <div class="actions">
         <button id="request-order-btn" class="primary" ${state.orderSubmitting ? 'disabled' : ''}>${state.orderSubmitting ? '依頼しています…' : 'この内容で仕入れを依頼する'}</button>
       </div>
@@ -1153,6 +1178,7 @@ function renderOrderRequestSection(r) {
     <ul class="order-line-list">
       ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}・${renderDeliveryMethodLabel(l)}:${renderOrderLineLabel(l.status)}</li>`).join('')}
     </ul>
+    ${order.lines.some(l => l.status === 'pending') && order.responseDeadline ? `<p class="hint">返信期限:${new Date(order.responseDeadline).toLocaleString('ja-JP')}</p>` : ''}
     <p class="hint">依頼の状況は「注文」タブでも確認できます。</p>
   `
 }
@@ -1284,6 +1310,12 @@ function renderListingStepThree() {
         <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="deliver" required /> 🚚 自分で配達する</label>
         <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="pickup" required /> 🏃 お店に取りに来てもらう</label>
       </fieldset>
+      <fieldset class="delivery-method-choice">
+        <legend>在庫状況(どちらか選んでください)</legend>
+        <label class="checkbox"><input form="listing-step3-form" type="radio" name="stockStatus" value="confirmed" required /> ✅ もう収穫済み(在庫あり・すぐ出せる)</label>
+        <label class="checkbox"><input form="listing-step3-form" type="radio" name="stockStatus" value="estimated" required /> 🌱 まだ見込み(収穫前)</label>
+      </fieldset>
+      <p class="hint">「収穫済み」を選ぶと、飲食店が仕入れを依頼した時点で承認不要ですぐ確定します。「見込み」は、依頼が来た後にあなたが承認/却下できます。</p>
       <details class="advanced-settings">
         <summary>受渡し等の詳しい設定(通常は変更しなくて大丈夫です)</summary>
         <div class="form-grid" style="margin-top:12px">
@@ -1316,7 +1348,7 @@ function renderProducerTable() {
   return `
     <div class="table-scroll">
       <table class="producer-table">
-        <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>鮮度期限</th><th>規格外</th><th>受け渡し</th><th>状態</th><th></th></tr></thead>
+        <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>鮮度期限</th><th>規格外</th><th>在庫状況</th><th>受け渡し</th><th>状態</th><th></th></tr></thead>
         <tbody>
           ${state.producers.map(p => `
             <tr class="${p.available === false ? 'unavailable' : ''}">
@@ -1327,6 +1359,7 @@ function renderProducerTable() {
               <td>${escapeHtml(p.availableDate || '')}</td>
               <td>${renderFreshnessCell(p)}</td>
               <td>${p.isOffGrade ? `規格外(${escapeHtml(p.offGradeReason || '')})` : '通常品'}</td>
+              <td>${renderStockStatusLabel(p)}</td>
               <td>${renderDeliveryMethodLabel(p)}</td>
               <td>${p.available === false ? '出荷不可' : '出荷可能'}</td>
               <td class="table-actions">
@@ -1396,7 +1429,15 @@ function renderOrders() {
 }
 
 function renderOrderLineLabel(status) {
-  return status === 'accepted' ? '承認済み' : status === 'rejected' ? '却下' : '承認待ち'
+  if (status === 'accepted') return '承認済み'
+  if (status === 'rejected') return '却下'
+  if (status === 'expired') return '期限切れ(自動却下)'
+  return '承認待ち'
+}
+
+// 在庫状況(収穫済み・在庫確定 / 見込み・収穫前)の表示。出品オブジェクトを受け取る。
+function renderStockStatusLabel(p) {
+  return p.stockStatus === 'confirmed' ? '✅ 在庫確定' : '🌱 見込み'
 }
 
 // 受け渡し方法(A:生産者が配達/B:お店が引き取り)の表示。出品・注文lineの両方で
@@ -1434,6 +1475,7 @@ function renderMyOrderCard(order) {
         ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}(${fmtNum(l.amount * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}:${renderOrderLineLabel(l.status)}</li>`).join('')}
       </ul>
       <div class="order-total">合計 ${fmtNum(order.totalQuantity)}${escapeHtml(order.unit)}・${fmtNum(order.totalPrice)}円</div>
+      ${order.lines.some(l => l.status === 'pending') && order.responseDeadline ? `<p class="hint">返信期限:${new Date(order.responseDeadline).toLocaleString('ja-JP')}</p>` : ''}
       ${cancellable ? `<div class="actions"><button type="button" data-order-cancel="${order.id}" class="table-btn table-btn-danger">依頼を取り消す</button></div>` : ''}
     </div>
   `
@@ -1470,6 +1512,7 @@ function renderIncomingOrderCard(order, deviceId) {
           return `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}(${fmtNum(l.amount * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}${label}</li>`
         }).join('')}
       </ul>
+      ${order.lines.some(l => l.status === 'pending') && order.responseDeadline ? `<p class="hint">返信期限:${new Date(order.responseDeadline).toLocaleString('ja-JP')}(過ぎると自動的に期限切れになります)</p>` : ''}
     </div>
   `
 }

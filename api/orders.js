@@ -7,9 +7,12 @@
 // 「所有権」はownerId(端末ごとの匿名UUID)の一致だけで確認する簡易なもの。
 // パスワード等を伴う本人認証ではない(api/listings.jsと同じ制約)。
 //
-// 在庫の事前予約はスコープ外: 依頼(POST)の時点ではlistingsのquantityを一切変更せず、
-// 生産者が承認(PATCH status:'accepted')した瞬間にだけ該当listingのquantityを減らす。
-// 却下時は何もしない(最初から確保していないため)。承認取消による在庫復元も今回は対象外。
+// 出品側のstockStatusが'confirmed'(収穫済み・在庫確定)の場合は、飲食店が依頼した瞬間に
+// 承認待ちを挟まず即座にaccepted扱いにする(中央卸売市場で即決済できることとの差を縮めるため)。
+// 'estimated'(見込み・未収穫)はこれまで通りpendingから始まり、生産者の承認/却下を待つ。
+// 承認待ちのまま応答が無い場合に無期限に待たされないよう、依頼側が指定したresponseDeadline
+// を過ぎたpending lineはGET時に自動で'expired'にする(lazy expiry。cron等の追加インフラなし)。
+// 在庫減算は、確定品の即時accepted・人間による承認のどちらでも同じ処理(applyAcceptedLine)を使う。
 
 import { put, get, list, del } from '@vercel/blob'
 
@@ -56,12 +59,46 @@ function validateLines(lines) {
   )
 }
 
+// lineをacceptedにし、対応する出品のquantityをその場で減算する。
+// 出品側の即時確定(POST)と、生産者による人間の承認(PATCH)の両方から呼ばれる。
+async function applyAcceptedLine(line) {
+  line.status = 'accepted'
+  const listing = await readJson(listingPathFor(line.listingId))
+  if (listing) {
+    listing.quantity = Math.max(0, listing.quantity - line.amount)
+    await writeJson(listingPathFor(line.listingId), listing)
+  }
+}
+
+// pendingのまま応答期限(responseDeadline)を過ぎたlineを'expired'にする。
+// 変更があった場合はtrueを返す(呼び出し側で書き戻すかどうかの判断に使う)。
+function expirePendingLines(order, now) {
+  if (!order.responseDeadline) return false
+  const deadline = new Date(order.responseDeadline).getTime()
+  if (Number.isNaN(deadline) || now < deadline) return false
+  let changed = false
+  for (const line of order.lines) {
+    if (line.status === 'pending') {
+      line.status = 'expired'
+      changed = true
+    }
+  }
+  return changed
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const role = String(req.query?.role || '')
       const ownerId = String(req.query?.ownerId || '')
       const all = await readAllOrders()
+      const now = Date.now()
+      await Promise.all(
+        all.map((o) => {
+          if (expirePendingLines(o, now)) return writeJson(orderPathFor(o.id), o)
+          return null
+        })
+      )
       const orders = role === 'producer'
         ? all.filter((o) => o.lines.some((l) => l.ownerId === ownerId))
         : all.filter((o) => o.requesterId === ownerId)
@@ -84,6 +121,7 @@ export default async function handler(req, res) {
         unit: String(body.unit || 'kg'),
         totalQuantity: Number(body.totalQuantity || 0),
         totalPrice: Number(body.totalPrice || 0),
+        responseDeadline: String(body.responseDeadline || ''),
         lines: body.lines.map((l) => ({
           listingId: l.listingId,
           ownerId: l.ownerId,
@@ -98,6 +136,16 @@ export default async function handler(req, res) {
         })),
         createdAt: new Date().toISOString()
       }
+
+      // 出品側が「収穫済み・在庫確定」なら、承認待ちを挟まずこの場で確定させる
+      // (中央卸売市場で即決済できることとの差を縮めるため)。
+      await Promise.all(
+        order.lines.map(async (line) => {
+          const listing = await readJson(listingPathFor(line.listingId))
+          if (listing?.stockStatus === 'confirmed') await applyAcceptedLine(line)
+        })
+      )
+
       await writeJson(orderPathFor(id), order)
       res.status(201).json({ order })
       return
@@ -115,20 +163,16 @@ export default async function handler(req, res) {
 
       const order = await readJson(orderPathFor(id))
       if (!order) { res.status(404).json({ error: 'not found' }); return }
+      // 期限切れの反映を先に適用してから判定する(期限切れ後の承認/却下を弾くため)。
+      if (expirePendingLines(order, Date.now())) await writeJson(orderPathFor(id), order)
       const line = order.lines.find((l) => l.listingId === listingId)
       if (!line) { res.status(404).json({ error: 'line not found' }); return }
       if (line.ownerId !== ownerId) { res.status(403).json({ error: 'ownerId mismatch' }); return }
+      if (line.status !== 'pending') { res.status(409).json({ error: `line is already ${line.status}` }); return }
 
-      line.status = status
+      if (status === 'accepted') await applyAcceptedLine(line)
+      else line.status = 'rejected'
       await writeJson(orderPathFor(id), order)
-
-      if (status === 'accepted') {
-        const listing = await readJson(listingPathFor(listingId))
-        if (listing) {
-          listing.quantity = Math.max(0, listing.quantity - line.amount)
-          await writeJson(listingPathFor(listingId), listing)
-        }
-      }
       res.status(200).json({ order })
       return
     }
