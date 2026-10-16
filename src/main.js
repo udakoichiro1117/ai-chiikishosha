@@ -402,7 +402,11 @@ async function handleRequestOrder() {
       farmName: a.farm.farmName,
       item: a.farm.item,
       amount: a.amount,
-      unitPrice: a.farm.unitPrice
+      unitPrice: a.farm.unitPrice,
+      // 受け渡し方法は出品(生産者)側が決めたものをそのまま引き継ぐ(A+Bの組み合わせ: 農家ごとに異なってよい)。
+      deliveryMethod: a.farm.deliveryMethod || 'pickup',
+      deliveryLocation: a.farm.deliveryLocation || '',
+      deliveryTime: a.farm.deliveryTime || ''
     }))
   }
   try {
@@ -668,6 +672,7 @@ async function handleListingStepThreeSubmit(form) {
     unitPrice: Number(data.get('unitPrice') || 0),
     isOffGrade: data.get('isOffGrade') === 'on',
     offGradeReason: String(data.get('offGradeReason') || ''),
+    deliveryMethod: String(data.get('deliveryMethod') || ''),
     deliveryLocation: String(data.get('deliveryLocation') || ''),
     deliveryTime: String(data.get('deliveryTime') || ''),
     minQuantity: Number(data.get('minQuantity') || 1),
@@ -1081,6 +1086,7 @@ function renderResult() {
             </div>
             <div class="alloc-amount">${fmtNum(a.amount)}<span class="alloc-unit">${escapeHtml(a.farm.unit)}</span></div>
             <div class="alloc-price">${fmtNum(a.amount * a.farm.unitPrice)}円<span class="alloc-unitprice">(${fmtNum(a.farm.unitPrice)}円/${escapeHtml(a.farm.unit)})</span></div>
+            <div class="alloc-delivery">${renderDeliveryMethodLabel(a.farm)}</div>
           </div>
         `).join('')}
         <div class="alloc-card alloc-total">
@@ -1125,9 +1131,7 @@ function renderOrderRequestSection(r) {
   return `
     <p class="status-note">状態:<span class="freshness-badge freshness-${summary.tone}">${escapeHtml(summary.label)}</span></p>
     <ul class="order-line-list">
-      ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}:${
-        l.status === 'accepted' ? '承認済み' : l.status === 'rejected' ? '却下' : '承認待ち'
-      }</li>`).join('')}
+      ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}・${renderDeliveryMethodLabel(l)}:${renderOrderLineLabel(l.status)}</li>`).join('')}
     </ul>
     <p class="hint">依頼の状況は「注文」タブでも確認できます。</p>
   `
@@ -1255,11 +1259,16 @@ function renderListingStepThree() {
         <label class="checkbox"><input name="isOffGrade" type="checkbox" ${d.isOffGrade ? 'checked' : ''} /> 規格外(余剰・形不揃い等)</label>
         <label>規格外理由(任意)<input name="offGradeReason" type="text" placeholder="形の不揃い" value="${escapeHtml(d.offGradeReason || '')}" /></label>
       </form>
+      <fieldset class="delivery-method-choice">
+        <legend>受け渡し方法(どちらか選んでください)</legend>
+        <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="deliver" required /> 🚚 自分で配達する</label>
+        <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="pickup" required /> 🏃 お店に取りに来てもらう</label>
+      </fieldset>
       <details class="advanced-settings">
         <summary>受渡し等の詳しい設定(通常は変更しなくて大丈夫です)</summary>
         <div class="form-grid" style="margin-top:12px">
-          <label>受渡場所<input form="listing-step3-form" name="deliveryLocation" type="text" value="${escapeHtml(DEMO_LOCATION)}" /></label>
-          <label>受渡時間<input form="listing-step3-form" name="deliveryTime" type="text" value="${escapeHtml(DEMO_TIME)}" /></label>
+          <label>受渡場所の目安(引き取りの場合は集合場所)<input form="listing-step3-form" name="deliveryLocation" type="text" value="${escapeHtml(DEMO_LOCATION)}" /></label>
+          <label>受渡時間帯<input form="listing-step3-form" name="deliveryTime" type="text" value="${escapeHtml(DEMO_TIME)}" /></label>
           <label>最低販売量<input form="listing-step3-form" name="minQuantity" type="number" min="0" step="0.1" value="1" /></label>
           <label>販売刻み<input form="listing-step3-form" name="incrementStep" type="number" min="0.1" step="0.1" value="1" /></label>
         </div>
@@ -1287,7 +1296,7 @@ function renderProducerTable() {
   return `
     <div class="table-scroll">
       <table class="producer-table">
-        <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>鮮度期限</th><th>規格外</th><th>状態</th><th></th></tr></thead>
+        <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>鮮度期限</th><th>規格外</th><th>受け渡し</th><th>状態</th><th></th></tr></thead>
         <tbody>
           ${state.producers.map(p => `
             <tr class="${p.available === false ? 'unavailable' : ''}">
@@ -1298,6 +1307,7 @@ function renderProducerTable() {
               <td>${escapeHtml(p.availableDate || '')}</td>
               <td>${renderFreshnessCell(p)}</td>
               <td>${p.isOffGrade ? `規格外(${escapeHtml(p.offGradeReason || '')})` : '通常品'}</td>
+              <td>${renderDeliveryMethodLabel(p)}</td>
               <td>${p.available === false ? '出荷不可' : '出荷可能'}</td>
               <td class="table-actions">
                 <button data-toggle-id="${p.id}" class="table-btn">${p.available === false ? '出荷再開' : '出荷停止'}</button>
@@ -1369,6 +1379,16 @@ function renderOrderLineLabel(status) {
   return status === 'accepted' ? '承認済み' : status === 'rejected' ? '却下' : '承認待ち'
 }
 
+// 受け渡し方法(A:生産者が配達/B:お店が引き取り)の表示。出品・注文lineの両方で
+// 同じ形のオブジェクト({deliveryMethod, deliveryLocation, deliveryTime})を受け取れる。
+function renderDeliveryMethodLabel(d) {
+  if (d.deliveryMethod === 'deliver') {
+    return `🚚 生産者が配達${d.deliveryTime ? `(${escapeHtml(d.deliveryTime)})` : ''}`
+  }
+  const place = [d.deliveryLocation, d.deliveryTime].filter(Boolean).map(escapeHtml).join('・')
+  return `🏃 お店が引き取り${place ? `(${place})` : ''}`
+}
+
 function renderMyOrders() {
   return `
     <section class="panel">
@@ -1391,7 +1411,7 @@ function renderMyOrderCard(order) {
         <span class="hint">${new Date(order.createdAt).toLocaleString('ja-JP')}</span>
       </div>
       <ul class="order-line-list">
-        ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}(${fmtNum(l.amount * l.unitPrice)}円):${renderOrderLineLabel(l.status)}</li>`).join('')}
+        ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}(${fmtNum(l.amount * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}:${renderOrderLineLabel(l.status)}</li>`).join('')}
       </ul>
       <div class="order-total">合計 ${fmtNum(order.totalQuantity)}${escapeHtml(order.unit)}・${fmtNum(order.totalPrice)}円</div>
       ${cancellable ? `<div class="actions"><button type="button" data-order-cancel="${order.id}" class="table-btn table-btn-danger">依頼を取り消す</button></div>` : ''}
@@ -1427,7 +1447,7 @@ function renderIncomingOrderCard(order, deviceId) {
                 <button type="button" data-order-respond data-order-id="${order.id}" data-listing-id="${l.listingId}" data-status="rejected" class="table-btn table-btn-danger">却下</button>
               </span>`
             : `:${renderOrderLineLabel(l.status)}${mine ? '' : '(他の農家の出品)'}`
-          return `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}(${fmtNum(l.amount * l.unitPrice)}円)${label}</li>`
+          return `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}(${fmtNum(l.amount * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}${label}</li>`
         }).join('')}
       </ul>
     </div>

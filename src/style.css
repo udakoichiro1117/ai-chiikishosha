@@ -316,6 +316,19 @@ textarea, input[type=text], input[type=number], input[type=date], select {
 .form-grid label.checkbox { flex-direction: row; align-items: center; gap: 8px; }
 .form-grid label.checkbox input { width: auto; }
 
+.delivery-method-choice {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 12px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+.delivery-method-choice legend { font-size: 0.82rem; color: var(--muted); padding: 0 4px; }
+.alloc-delivery { font-size: 0.78rem; color: var(--muted); }
+
 .zip-row { display: flex; gap: 8px; align-items: center; }
 .zip-row input { flex: 1; min-width: 0; }
 .zip-row button { flex: none; white-space: nowrap; }

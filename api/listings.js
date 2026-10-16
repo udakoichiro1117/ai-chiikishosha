@@ -42,7 +42,8 @@ async function seedIfEmpty() {
   const demo = buildDefaultProducers()
   await Promise.all(
     demo.map((p) => {
-      const listing = { ...p, ownerId: SEED_OWNER, expiryDate: computeExpiryDate(p.availableDate, p.item) }
+      // デモのA/B/C農家は「共通受渡拠点」想定(元々の03spec.mdのデモ設定)なので、既定はpickupにする。
+      const listing = { ...p, ownerId: SEED_OWNER, deliveryMethod: 'pickup', expiryDate: computeExpiryDate(p.availableDate, p.item) }
       return put(pathFor(p.id), JSON.stringify(listing), {
         access: 'private',
         addRandomSuffix: false,
@@ -68,6 +69,7 @@ export default async function handler(req, res) {
       if (!ownerId) { res.status(400).json({ error: 'ownerId is required' }); return }
       if (typeof body.item !== 'string' || !body.item) { res.status(400).json({ error: 'item is required' }); return }
       if (typeof body.quantity !== 'number' || !(body.quantity > 0)) { res.status(400).json({ error: 'quantity must be a positive number' }); return }
+      if (!['deliver', 'pickup'].includes(body.deliveryMethod)) { res.status(400).json({ error: 'deliveryMethod must be deliver or pickup' }); return }
 
       const id = `L${Date.now()}${Math.random().toString(36).slice(2, 8)}`
       const listing = {
@@ -84,6 +86,7 @@ export default async function handler(req, res) {
         unitPrice: Number(body.unitPrice || 0),
         isOffGrade: !!body.isOffGrade,
         offGradeReason: String(body.offGradeReason || ''),
+        deliveryMethod: body.deliveryMethod,
         deliveryLocation: String(body.deliveryLocation || ''),
         deliveryTime: String(body.deliveryTime || ''),
         minQuantity: Number(body.minQuantity || 1),
