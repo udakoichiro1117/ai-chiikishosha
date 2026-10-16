@@ -90,6 +90,7 @@ export default async function handler(req, res) {
         offGradeReason: String(body.offGradeReason || ''),
         stockStatus: body.stockStatus,
         deliveryMethod: body.deliveryMethod,
+        hubId: body.deliveryMethod === 'hub' ? String(body.hubId || '') : null,
         deliveryLocation: String(body.deliveryLocation || ''),
         deliveryTime: String(body.deliveryTime || ''),
         minQuantity: Number(body.minQuantity || 1),
