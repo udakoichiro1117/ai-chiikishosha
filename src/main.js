@@ -25,6 +25,7 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  hubs: any[],
  *  showNewHubForm: boolean,
  *  userEmail: string|null,
+ *  userRole: 'restaurant'|'producer'|null,
  *  authSubmitting: boolean,
  *  authLinkSent: boolean,
  *  authError: string|null,
@@ -55,7 +56,7 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, hubs: [], showNewHubForm: false, userEmail: getUserEmail(), authSubmitting: false, authLinkSent: false, authError: null, screen: 'home' }
+      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, hubs: [], showNewHubForm: false, userEmail: getUserEmail(), userRole: getUserRole(), authSubmitting: false, authLinkSent: false, authError: null, screen: 'home' }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
@@ -83,6 +84,7 @@ function loadState() {
     hubs: [],
     showNewHubForm: false,
     userEmail: getUserEmail(),
+    userRole: getUserRole(),
     authSubmitting: false,
     authLinkSent: false,
     authError: null,
@@ -231,6 +233,9 @@ function getDeviceId() {
 // 既知の制約: ログイン前にUUIDで作成した出品・注文は、ログイン後はその端末からも
 // 編集・削除できなくなる(自動移行は今回のスコープ外)。
 const USER_EMAIL_KEY = 'ai-chiikishosha-user-email'
+// 役割(飲食店/生産者)は1アカウントにつき1つに固定(api/auth.jsのコメント参照)。
+// ログインリンク申請時に選んだ役割がここに保存され、ログイン中はその役割の画面だけを見せる。
+const USER_ROLE_KEY = 'ai-chiikishosha-user-role'
 function getOwnerId() {
   try {
     return localStorage.getItem(USER_EMAIL_KEY) || getDeviceId()
@@ -245,6 +250,20 @@ function getUserEmail() {
   } catch (e) {
     return null
   }
+}
+
+function getUserRole() {
+  try {
+    return localStorage.getItem(USER_ROLE_KEY)
+  } catch (e) {
+    return null
+  }
+}
+
+// ログイン中はアカウントに固定された役割を、未ログイン時は直近に開いた画面の役割を使う
+// (未ログインのままでも仕入れ・出品の両方を試せるデモ的な使い方を維持するため)。
+function effectiveRole() {
+  return state.userRole || state.lastRole
 }
 
 async function fetchListings() {
@@ -327,14 +346,20 @@ async function handleNewHubSubmit() {
 
 // メールアドレスにワンタイムログインリンクを送る。パスワードは扱わない
 // (api/auth.jsのコメント参照)。
-async function handleAuthRequestLink(email) {
+async function handleAuthRequestLink(email, role) {
   setState({ authSubmitting: true, authError: null })
   try {
     const res = await fetch('/api/auth?action=request', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email })
+      body: JSON.stringify({ email, role })
     })
+    if (res.status === 409) {
+      const { existingRole } = await res.json().catch(() => ({}))
+      const label = existingRole === 'producer' ? '生産者' : '飲食店'
+      setState({ authSubmitting: false, authError: `このメールアドレスは既に${label}として登録されています。「${label}として使う」を選んで送り直してください。` })
+      return
+    }
     if (!res.ok) throw new Error('api not ok')
     setState({ authSubmitting: false, authLinkSent: true })
   } catch (e) {
@@ -343,8 +368,11 @@ async function handleAuthRequestLink(email) {
 }
 
 function handleAuthLogout() {
-  try { localStorage.removeItem(USER_EMAIL_KEY) } catch (e) { /* no-op */ }
-  setState({ userEmail: null, authLinkSent: false, authError: null })
+  try {
+    localStorage.removeItem(USER_EMAIL_KEY)
+    localStorage.removeItem(USER_ROLE_KEY)
+  } catch (e) { /* no-op */ }
+  setState({ userEmail: null, userRole: null, authLinkSent: false, authError: null })
   // ログイン状態(=ownerId)が変わったので、自分の出品・注文一覧を取り直す。
   fetchListings()
   fetchOrders()
@@ -362,9 +390,10 @@ async function handleAuthTokenFromUrl() {
       body: JSON.stringify({ token })
     })
     if (!res.ok) throw new Error('api not ok')
-    const { email } = await res.json()
+    const { email, role } = await res.json()
     localStorage.setItem(USER_EMAIL_KEY, email)
-    showFlash(`${email} でログインしました`, { userEmail: email })
+    if (role) localStorage.setItem(USER_ROLE_KEY, role)
+    showFlash(`${email} でログインしました`, { userEmail: email, userRole: role || null })
     fetchListings()
     fetchOrders()
   } catch (e) {
@@ -973,14 +1002,18 @@ function renderSidebar() {
       <span class="nav-icon">${icon}</span><span class="nav-label">${label}</span>
     </button>
   `
+  // ログイン中は役割が固定されているため、反対側の役割の画面はそもそもナビに出さない。
+  // 未ログインの場合は従来どおり両方を試せるようにする。
+  const showRestaurant = state.userRole !== 'producer'
+  const showProducer = state.userRole !== 'restaurant'
   return `
     <nav class="sidebar">
       <div class="sidebar-brand"><span class="sidebar-brand-icon">🌱</span>AI地域商社</div>
       <div class="sidebar-nav">
         ${item('home', '🏠', 'ホーム')}
-        ${item('restaurant', '🛒', '仕入れ')}
-        ${item('rescue', '⏰', 'おまかせ救済')}
-        ${item('producer', '🌱', '出品')}
+        ${showRestaurant ? item('restaurant', '🛒', '仕入れ') : ''}
+        ${showRestaurant ? item('rescue', '⏰', 'おまかせ救済') : ''}
+        ${showProducer ? item('producer', '🌱', '出品') : ''}
         ${item('orders', '📦', '注文')}
         ${item('settings', '⚙️', '設定')}
       </div>
@@ -1060,20 +1093,22 @@ function renderHome() {
     ` : ''}
 
     <section class="cta-section">
-      <p class="cta-label">どちらで使いますか？</p>
+      <p class="cta-label">${state.userRole ? '' : 'どちらで使いますか？'}</p>
       <div class="cta-row">
+        ${state.userRole !== 'producer' ? `
         <div class="cta-col">
           <button class="cta-btn cta-primary" data-nav="restaurant">
             <span class="cta-icon">🛒</span><span class="cta-text">仕入れ案を作る(飲食店)</span><span class="cta-arrow">→</span>
           </button>
           <p class="cta-why">欲しい量を伝えるだけで、近隣の複数の農家から自動で組み合わせます</p>
-        </div>
+        </div>` : ''}
+        ${state.userRole !== 'restaurant' ? `
         <div class="cta-col">
           <button class="cta-btn cta-outline" data-nav="producer">
             <span class="cta-icon">🌱</span><span class="cta-text">販売できるものを登録(生産者)</span><span class="cta-plus">＋</span>
           </button>
           <p class="cta-why">規格外・余剰品にも、自分で値段をつけて出品できます</p>
-        </div>
+        </div>` : ''}
       </div>
     </section>
 
@@ -1609,7 +1644,7 @@ function renderOrdersStatus() {
 }
 
 function renderOrders() {
-  const role = state.lastRole
+  const role = effectiveRole()
   if (!role) {
     return `
       <section class="panel">
@@ -1777,10 +1812,11 @@ function renderDisplaySettingsCard() {
 // ログインすると、端末の匿名UUIDの代わりにこのメールアドレスを所有権(ownerId)として使う。
 function renderAccountCard() {
   if (state.userEmail) {
+    const roleLabel = state.userRole === 'producer' ? '生産者' : state.userRole === 'restaurant' ? '飲食店' : null
     return `
       <section class="panel">
         <h3>アカウント</h3>
-        <p class="hint">ログイン中:<strong>${escapeHtml(state.userEmail)}</strong></p>
+        <p class="hint">ログイン中:<strong>${escapeHtml(state.userEmail)}</strong>${roleLabel ? `(${roleLabel}アカウント)` : ''}</p>
         <p class="hint">この端末で作成した出品・注文は、このメールアドレスでどの端末からでも管理できます。</p>
         <div class="actions"><button id="auth-logout-btn">ログアウトする</button></div>
       </section>
@@ -1801,7 +1837,10 @@ function renderAccountCard() {
       <p class="hint">メールアドレスを登録すると、機種変更やブラウザのデータ削除があっても、別の端末から自分の出品・注文にアクセスできるようになります(パスワードは不要です)。</p>
       <form id="auth-request-form" class="form-grid">
         <label>メールアドレス<input type="email" name="email" required placeholder="例:mikami@example.com" /></label>
+        <label class="checkbox"><input type="radio" name="role" value="restaurant" checked /> 飲食店として使う</label>
+        <label class="checkbox"><input type="radio" name="role" value="producer" /> 生産者として使う</label>
       </form>
+      <p class="hint">※ 一度登録した役割は後から変更できません(生産者・飲食店どちらも試したい場合は、別のメールアドレスでご登録ください)。</p>
       ${state.authError ? `<p class="warn">${escapeHtml(state.authError)}</p>` : ''}
       <div class="actions">
         <button id="auth-request-submit" class="primary" ${state.authSubmitting ? 'disabled' : ''}>${state.authSubmitting ? '送信しています…' : 'ログインリンクを送る'}</button>
@@ -1811,14 +1850,16 @@ function renderAccountCard() {
 }
 
 function renderSettings() {
-  const role = state.lastRole
+  const role = effectiveRole()
+  // ログイン中は役割が固定されているため、切り替えスイッチ自体を出さない。
+  const switchHtml = state.userRole ? '' : renderSettingsSwitch()
 
   if (!role) {
     return `
       <section class="panel">
         <h2>設定</h2>
         <p class="hint">「仕入れ」または「出品」を一度開くと、その役割の設定だけがここに表示されます。先に下から選ぶこともできます。</p>
-        ${renderSettingsSwitch()}
+        ${switchHtml}
       </section>
       ${renderDisplaySettingsCard()}
       ${renderAccountCard()}
@@ -1830,7 +1871,7 @@ function renderSettings() {
     return `
       <section class="panel">
         <h2>設定(飲食店)</h2>
-        ${renderSettingsSwitch()}
+        ${switchHtml}
       </section>
       <section class="panel">
         <h3>受取条件</h3>
@@ -1853,7 +1894,7 @@ function renderSettings() {
   return `
     <section class="panel">
       <h2>設定(生産者)</h2>
-      ${renderSettingsSwitch()}
+      ${switchHtml}
     </section>
     <section class="panel">
       <h3>農園情報</h3>
@@ -1879,6 +1920,11 @@ function attachEvents() {
   document.querySelectorAll('[data-nav]').forEach(btn => {
     btn.addEventListener('click', () => {
       const key = btn.dataset.nav
+      // ログイン中は役割が固定されているため、他の役割の画面には遷移させない
+      // (念のための二重チェック。通常はボタン自体が表示されない)。
+      if (state.userRole === 'producer' && key === 'restaurant') return
+      if (state.userRole === 'producer' && key === 'rescue') return
+      if (state.userRole === 'restaurant' && key === 'producer') return
       // 仕入れ・出品・おまかせ救済は他端末の出品状況に関わる画面なので、開くたびに最新化する。
       if (['restaurant', 'producer', 'rescue'].includes(key)) fetchListings()
       if (['restaurant', 'producer', 'orders'].includes(key)) fetchOrders()
@@ -1916,8 +1962,10 @@ function attachEvents() {
     e.preventDefault()
     const form = document.getElementById('auth-request-form')
     if (!form.reportValidity()) return
-    const email = new FormData(form).get('email')
-    handleAuthRequestLink(String(email || '').trim())
+    const fd = new FormData(form)
+    const email = fd.get('email')
+    const role = fd.get('role')
+    handleAuthRequestLink(String(email || '').trim(), String(role || ''))
   })
   document.getElementById('auth-link-resend-btn')?.addEventListener('click', () => setState({ authLinkSent: false }))
   document.getElementById('auth-logout-btn')?.addEventListener('click', handleAuthLogout)

@@ -9,26 +9,39 @@
 //
 // トークンはUUID生成等とは別に、node:cryptoの暗号学的に強い乱数(randomBytes)で作る
 // (認証用途なので推測されない強度が必要なため)。
+//
+// 役割(飲食店/生産者)は1アカウント(メールアドレス)につき1つに固定する。
+// 初回のログインリンク申請時に選んだ役割をaccounts/<email>.jsonに記録し、
+// 以後その役割以外では同じメールアドレスからログインできないようにする。
 
 import { put, get } from '@vercel/blob'
 import { randomBytes } from 'node:crypto'
 
 const PREFIX = 'auth/'
+const ACCOUNT_PREFIX = 'accounts/'
 const TOKEN_TTL_MS = 15 * 60 * 1000 // 15分
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const ROLES = ['restaurant', 'producer']
 
 function pathFor(token) {
   return `${PREFIX}${token}.json`
 }
 
-async function readToken(pathname) {
+// メールアドレスはpathnameにそのまま使う(encodeURIComponentすると、put/getが内部で
+// さらに独自にエンコードするため二重エンコードになり、書き込みと読み出しのキーが
+// 一致しなくなる実機検証で判明した不具合がある)。
+function accountPathFor(email) {
+  return `${ACCOUNT_PREFIX}${email}.json`
+}
+
+async function readJson(pathname) {
   const result = await get(pathname, { access: 'private', useCache: false })
   if (!result) return null
   const text = await new Response(result.stream).text()
   return JSON.parse(text)
 }
 
-async function writeToken(pathname, data) {
+async function writeJson(pathname, data) {
   await put(pathname, JSON.stringify(data), {
     access: 'private',
     addRandomSuffix: false,
@@ -36,6 +49,9 @@ async function writeToken(pathname, data) {
     contentType: 'application/json'
   })
 }
+
+const readAccount = (email) => readJson(accountPathFor(email))
+const writeAccount = (email, data) => writeJson(accountPathFor(email), data)
 
 async function sendLoginEmail(email, loginUrl) {
   const apiKey = process.env.RESEND_API_KEY
@@ -62,6 +78,17 @@ export default async function handler(req, res) {
     if (action === 'request') {
       const email = String(body.email || '').trim().toLowerCase()
       if (!EMAIL_RE.test(email)) { res.status(400).json({ error: 'invalid email' }); return }
+      const role = String(body.role || '')
+      if (!ROLES.includes(role)) { res.status(400).json({ error: 'invalid role' }); return }
+
+      const account = await readAccount(email)
+      if (account && account.role !== role) {
+        res.status(409).json({ error: 'role mismatch', existingRole: account.role })
+        return
+      }
+      if (!account) {
+        await writeAccount(email, { email, role, createdAt: new Date().toISOString() })
+      }
 
       const token = randomBytes(32).toString('hex')
       const now = Date.now()
@@ -72,7 +99,7 @@ export default async function handler(req, res) {
         expiresAt: new Date(now + TOKEN_TTL_MS).toISOString(),
         used: false
       }
-      await writeToken(pathFor(token), record)
+      await writeJson(pathFor(token), record)
 
       // ホスト名はクライアントの自己申告ではなく、リクエストヘッダーから取る(Vercelは常にhttps)。
       const host = req.headers?.host || 'localhost'
@@ -91,14 +118,15 @@ export default async function handler(req, res) {
     if (action === 'verify') {
       const token = String(body.token || '')
       if (!token) { res.status(400).json({ error: 'token is required' }); return }
-      const record = await readToken(pathFor(token))
+      const record = await readJson(pathFor(token))
       if (!record) { res.status(404).json({ error: 'invalid token' }); return }
       if (record.used) { res.status(410).json({ error: 'token already used' }); return }
       if (Date.now() > new Date(record.expiresAt).getTime()) { res.status(410).json({ error: 'token expired' }); return }
 
       record.used = true
-      await writeToken(pathFor(token), record)
-      res.status(200).json({ email: record.email })
+      await writeJson(pathFor(token), record)
+      const account = await readAccount(record.email)
+      res.status(200).json({ email: record.email, role: account?.role || null })
       return
     }
 
