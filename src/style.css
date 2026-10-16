@@ -460,6 +460,19 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .order-line-list { margin: 0; padding-left: 1.1em; font-size: 0.88rem; display: flex; flex-direction: column; gap: 4px; }
 .order-total { font-weight: 700; }
 .order-line-actions { display: inline-flex; gap: 6px; margin-left: 8px; }
+.amend-line-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.amend-line-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--muted); }
+.amend-line-form input { width: auto; }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }

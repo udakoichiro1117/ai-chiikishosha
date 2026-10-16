@@ -158,8 +158,6 @@ export default async function handler(req, res) {
       const body = req.body || {}
       const ownerId = String(body.ownerId || '')
       const listingId = String(body.listingId || '')
-      const status = String(body.status || '')
-      if (!['accepted', 'rejected'].includes(status)) { res.status(400).json({ error: 'invalid status' }); return }
 
       const order = await readJson(orderPathFor(id))
       if (!order) { res.status(404).json({ error: 'not found' }); return }
@@ -168,6 +166,28 @@ export default async function handler(req, res) {
       const line = order.lines.find((l) => l.listingId === listingId)
       if (!line) { res.status(404).json({ error: 'line not found' }); return }
       if (line.ownerId !== ownerId) { res.status(403).json({ error: 'ownerId mismatch' }); return }
+
+      // action:'amend' は、承認後に天候等で実際に用意できる量が減った場合の事後修正。
+      // 在庫(listingのquantity)には触れない(承認時点で既に見積もり分を確保済みの扱いのため、
+      // ここで戻すと「実際には無い在庫」が再び売り物として出てしまう)。減額のみ許可し、
+      // 増額(＝見積もりより多く用意できた、は別の問題なので対象外)は弾く。
+      if (body.action === 'amend') {
+        if (line.status !== 'accepted') { res.status(409).json({ error: `line is ${line.status}, not accepted` }); return }
+        const currentAmount = line.amendedAmount ?? line.amount
+        const newAmount = Number(body.newAmount)
+        const reason = String(body.reason || '')
+        if (!(newAmount >= 0) || !(newAmount < currentAmount)) { res.status(400).json({ error: 'newAmount must be a non-negative number less than the current amount' }); return }
+        if (!reason) { res.status(400).json({ error: 'reason is required' }); return }
+        line.amendedAmount = newAmount
+        line.amendedReason = reason
+        line.amendedAt = new Date().toISOString()
+        await writeJson(orderPathFor(id), order)
+        res.status(200).json({ order })
+        return
+      }
+
+      const status = String(body.status || '')
+      if (!['accepted', 'rejected'].includes(status)) { res.status(400).json({ error: 'invalid status' }); return }
       if (line.status !== 'pending') { res.status(409).json({ error: `line is already ${line.status}` }); return }
 
       if (status === 'accepted') await applyAcceptedLine(line)

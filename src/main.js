@@ -21,6 +21,7 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  ordersLoading: boolean,
  *  ordersError: string|null,
  *  orderSubmitting: boolean,
+ *  amendingLineKey: string|null,
  *  requestText: string,
  *  parsed: {item:string,quantity:number,unit:string,neededDate:string,region:string,allowOffGrade:boolean,priceLimit:number|null,source:string}|null,
  *  result: any|null,
@@ -48,7 +49,7 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, screen: 'home' }
+      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, screen: 'home' }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
@@ -72,6 +73,7 @@ function loadState() {
     ordersLoading: true,
     ordersError: null,
     orderSubmitting: false,
+    amendingLineKey: null,
     requestText: buildDefaultRequestText(),
     parsed: null,
     result: null,
@@ -83,7 +85,7 @@ function saveState() {
   try {
     // flashMessageは一時的なUI通知、producers/orders関連はサーバーが正、*Submitting等は送信中フラグなので、
     // いずれも保存対象から除く(保存すると、例えば送信中のまま再読み込みした際に固まって見える)。
-    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, myOrders, incomingOrders, ordersLoading, ordersError, orderSubmitting, ...persisted } = state
+    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, myOrders, incomingOrders, ordersLoading, ordersError, orderSubmitting, amendingLineKey, ...persisted } = state
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted))
   } catch (e) { /* 保存できなくても画面表示は継続する */ }
 }
@@ -551,6 +553,48 @@ async function handleOrderCancel(orderId) {
     setState({ myOrders: state.myOrders.filter(o => o.id !== orderId) })
   } catch (e) {
     showFlash('依頼の取り消しに失敗しました。通信状況を確認してください。')
+  }
+}
+
+function amendLineKey(orderId, listingId) {
+  return `${orderId}:${listingId}`
+}
+
+// 承認後に天候等で実際に用意できる量が減った場合、生産者が承認済みlineを減額できる。
+// インライン編集フォームの開閉だけを行う(送信はhandleOrderLineAmendSubmitで行う)。
+function handleOrderLineAmendToggle(orderId, listingId) {
+  const key = amendLineKey(orderId, listingId)
+  setState({ amendingLineKey: state.amendingLineKey === key ? null : key })
+}
+
+async function handleOrderLineAmendSubmit(orderId, listingId, form) {
+  const data = new FormData(form)
+  const newAmount = Number(data.get('newAmount'))
+  const reason = String(data.get('reason') || '').trim()
+  if (!(newAmount >= 0) || !reason) return
+
+  const prev = state.incomingOrders
+  setState({
+    incomingOrders: prev.map(o => o.id === orderId
+      ? { ...o, lines: o.lines.map(l => l.listingId === listingId ? { ...l, amendedAmount: newAmount, amendedReason: reason } : l) }
+      : o),
+    amendingLineKey: null
+  })
+  try {
+    const res = await fetch(`/api/orders?id=${encodeURIComponent(orderId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ownerId: getDeviceId(), listingId, action: 'amend', newAmount, reason })
+    })
+    if (!res.ok) {
+      setState({ incomingOrders: prev })
+      showFlash(res.status === 400 ? '修正内容が正しくありません(現在の数量より少ない値を入力してください)' : '数量の修正に失敗しました。通信状況を確認してください。')
+      return
+    }
+    showFlash('数量の修正を飲食店に伝えました')
+  } catch (e) {
+    setState({ incomingOrders: prev })
+    showFlash('数量の修正に失敗しました。通信状況を確認してください。')
   }
 }
 
@@ -1176,7 +1220,7 @@ function renderOrderRequestSection(r) {
   return `
     <p class="status-note">状態:<span class="freshness-badge freshness-${summary.tone}">${escapeHtml(summary.label)}</span></p>
     <ul class="order-line-list">
-      ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}・${renderDeliveryMethodLabel(l)}:${renderOrderLineLabel(l.status)}</li>`).join('')}
+      ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(effectiveLineAmount(l))}${escapeHtml(order.unit)}・${renderDeliveryMethodLabel(l)}:${renderOrderLineLabel(l.status)}${renderAmendInfo(l, order.unit)}</li>`).join('')}
     </ul>
     ${order.lines.some(l => l.status === 'pending') && order.responseDeadline ? `<p class="hint">返信期限:${new Date(order.responseDeadline).toLocaleString('ja-JP')}</p>` : ''}
     <p class="hint">依頼の状況は「注文」タブでも確認できます。</p>
@@ -1435,6 +1479,17 @@ function renderOrderLineLabel(status) {
   return '承認待ち'
 }
 
+// 承認後に天候等の事情で数量が減らされた場合の実際の数量。未修正ならそのまま元の数量。
+function effectiveLineAmount(l) {
+  return l.amendedAmount ?? l.amount
+}
+
+// 事後修正があった場合の注記(当初の数量→修正後の数量、理由)。無い場合は空文字。
+function renderAmendInfo(l, unit) {
+  if (l.amendedAmount == null) return ''
+  return `<p class="warn">⚠️ 当初${fmtNum(l.amount)}${escapeHtml(unit)}→${fmtNum(l.amendedAmount)}${escapeHtml(unit)}に変更(理由:${escapeHtml(l.amendedReason || '')})</p>`
+}
+
 // 在庫状況(収穫済み・在庫確定 / 見込み・収穫前)の表示。出品オブジェクトを受け取る。
 function renderStockStatusLabel(p) {
   return p.stockStatus === 'confirmed' ? '✅ 在庫確定' : '🌱 見込み'
@@ -1472,7 +1527,7 @@ function renderMyOrderCard(order) {
         <span class="hint">${new Date(order.createdAt).toLocaleString('ja-JP')}</span>
       </div>
       <ul class="order-line-list">
-        ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}(${fmtNum(l.amount * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}:${renderOrderLineLabel(l.status)}</li>`).join('')}
+        ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(effectiveLineAmount(l))}${escapeHtml(order.unit)}(${fmtNum(effectiveLineAmount(l) * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}:${renderOrderLineLabel(l.status)}${renderAmendInfo(l, order.unit)}</li>`).join('')}
       </ul>
       <div class="order-total">合計 ${fmtNum(order.totalQuantity)}${escapeHtml(order.unit)}・${fmtNum(order.totalPrice)}円</div>
       ${order.lines.some(l => l.status === 'pending') && order.responseDeadline ? `<p class="hint">返信期限:${new Date(order.responseDeadline).toLocaleString('ja-JP')}</p>` : ''}
@@ -1501,20 +1556,45 @@ function renderIncomingOrderCard(order, deviceId) {
         <span class="hint">${escapeHtml(order.requesterName || '飲食店')}より・${new Date(order.createdAt).toLocaleString('ja-JP')}</span>
       </div>
       <ul class="order-line-list">
-        ${order.lines.map(l => {
-          const mine = l.ownerId === deviceId
-          const label = mine && l.status === 'pending'
-            ? `<span class="order-line-actions">
-                <button type="button" data-order-respond data-order-id="${order.id}" data-listing-id="${l.listingId}" data-status="accepted" class="table-btn">承認</button>
-                <button type="button" data-order-respond data-order-id="${order.id}" data-listing-id="${l.listingId}" data-status="rejected" class="table-btn table-btn-danger">却下</button>
-              </span>`
-            : `:${renderOrderLineLabel(l.status)}${mine ? '' : '(他の農家の出品)'}`
-          return `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(l.amount)}${escapeHtml(order.unit)}(${fmtNum(l.amount * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}${label}</li>`
-        }).join('')}
+        ${order.lines.map(l => renderIncomingOrderLine(order, l, deviceId)).join('')}
       </ul>
       ${order.lines.some(l => l.status === 'pending') && order.responseDeadline ? `<p class="hint">返信期限:${new Date(order.responseDeadline).toLocaleString('ja-JP')}(過ぎると自動的に期限切れになります)</p>` : ''}
     </div>
   `
+}
+
+// 承認後に天候等で実際に用意できる量が減った場合、自分の農家のline(accepted)にだけ
+// 「数量を修正する」を出す。pending中は従来通り承認/却下ボタンを出す。
+function renderIncomingOrderLine(order, l, deviceId) {
+  const mine = l.ownerId === deviceId
+  const lineKey = amendLineKey(order.id, l.listingId)
+  const isAmending = state.amendingLineKey === lineKey
+
+  let actionHtml = `:${renderOrderLineLabel(l.status)}${mine ? '' : '(他の農家の出品)'}`
+  if (mine && l.status === 'pending') {
+    actionHtml = `<span class="order-line-actions">
+        <button type="button" data-order-respond data-order-id="${order.id}" data-listing-id="${l.listingId}" data-status="accepted" class="table-btn">承認</button>
+        <button type="button" data-order-respond data-order-id="${order.id}" data-listing-id="${l.listingId}" data-status="rejected" class="table-btn table-btn-danger">却下</button>
+      </span>`
+  } else if (mine && l.status === 'accepted' && l.amendedAmount == null) {
+    actionHtml = `:${renderOrderLineLabel(l.status)}
+      <button type="button" data-order-amend-toggle data-order-id="${order.id}" data-listing-id="${l.listingId}" class="table-btn">数量を修正する</button>`
+  }
+
+  const amendForm = isAmending ? `
+    <form class="amend-line-form" data-order-id="${order.id}" data-listing-id="${l.listingId}">
+      <label>実際に用意できる数量(現在:${fmtNum(effectiveLineAmount(l))}${escapeHtml(order.unit)})
+        <input type="number" name="newAmount" min="0" max="${effectiveLineAmount(l) - (order.unit === 'kg' ? 0.1 : 1)}" step="${order.unit === 'kg' ? '0.1' : '1'}" required />
+      </label>
+      <label>理由<input type="text" name="reason" placeholder="例:長雨で収穫が減った" required /></label>
+      <div class="actions">
+        <button type="submit" class="primary table-btn">変更を送信</button>
+        <button type="button" data-order-amend-toggle data-order-id="${order.id}" data-listing-id="${l.listingId}" class="table-btn">キャンセル</button>
+      </div>
+    </form>
+  ` : ''
+
+  return `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(effectiveLineAmount(l))}${escapeHtml(order.unit)}(${fmtNum(effectiveLineAmount(l) * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}${actionHtml}${renderAmendInfo(l, order.unit)}${amendForm}</li>`
 }
 
 function renderSettingsSwitch() {
@@ -1625,6 +1705,16 @@ function attachEvents() {
   })
   document.querySelectorAll('[data-order-cancel]').forEach(btn => {
     btn.addEventListener('click', () => handleOrderCancel(btn.dataset.orderCancel))
+  })
+  document.querySelectorAll('[data-order-amend-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => handleOrderLineAmendToggle(btn.dataset.orderId, btn.dataset.listingId))
+  })
+  document.querySelectorAll('.amend-line-form').forEach(form => {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault()
+      if (!form.reportValidity()) return
+      handleOrderLineAmendSubmit(form.dataset.orderId, form.dataset.listingId, form)
+    })
   })
   document.querySelectorAll('[data-goto]').forEach(btn => {
     btn.addEventListener('click', () => setState({ screen: btn.dataset.goto }))
