@@ -190,9 +190,9 @@ body {
 .cta-section { display: flex; flex-direction: column; gap: 10px; }
 .cta-label { margin: 0; font-weight: 700; font-size: 0.95rem; }
 .cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.cta-col { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 6px; }
 .cta-btn {
-  flex: 1;
-  min-width: 220px;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -201,6 +201,7 @@ body {
   font-size: 0.95rem;
   cursor: pointer;
 }
+.cta-why { margin: 0; padding: 0 4px; font-size: 0.78rem; color: var(--muted); }
 .cta-icon { font-size: 1.2rem; }
 .cta-text { flex: 1; text-align: left; }
 .cta-primary { background: var(--restaurant-accent); color: #fff; border: 1px solid var(--restaurant-accent); }
@@ -230,6 +231,14 @@ body {
   padding: 18px 20px;
 }
 .panel h2 { margin: 0 0 10px; font-size: 1.05rem; }
+
+.value-prop {
+  background: var(--role-soft, var(--accent-soft));
+  border-color: var(--role-accent, var(--accent));
+}
+.value-prop h3 { margin: 0 0 8px; font-size: 0.95rem; color: var(--role-accent, var(--accent)); }
+.value-prop p { margin: 0 0 8px; font-size: 0.85rem; line-height: 1.6; }
+.value-prop p:last-child { margin-bottom: 0; }
 
 .profile-bar {
   display: flex;

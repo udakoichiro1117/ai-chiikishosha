@@ -848,12 +848,18 @@ function renderHome() {
     <section class="cta-section">
       <p class="cta-label">どちらで使いますか？</p>
       <div class="cta-row">
-        <button class="cta-btn cta-primary" data-nav="restaurant">
-          <span class="cta-icon">🛒</span><span class="cta-text">仕入れ案を作る(飲食店)</span><span class="cta-arrow">→</span>
-        </button>
-        <button class="cta-btn cta-outline" data-nav="producer">
-          <span class="cta-icon">🌱</span><span class="cta-text">販売できるものを登録(生産者)</span><span class="cta-plus">＋</span>
-        </button>
+        <div class="cta-col">
+          <button class="cta-btn cta-primary" data-nav="restaurant">
+            <span class="cta-icon">🛒</span><span class="cta-text">仕入れ案を作る(飲食店)</span><span class="cta-arrow">→</span>
+          </button>
+          <p class="cta-why">欲しい量を伝えるだけで、近隣の複数の農家から自動で組み合わせます</p>
+        </div>
+        <div class="cta-col">
+          <button class="cta-btn cta-outline" data-nav="producer">
+            <span class="cta-icon">🌱</span><span class="cta-text">販売できるものを登録(生産者)</span><span class="cta-plus">＋</span>
+          </button>
+          <p class="cta-why">規格外・余剰品にも、自分で値段をつけて出品できます</p>
+        </div>
       </div>
     </section>
 
@@ -877,6 +883,13 @@ function renderRestaurantRegister() {
   const p = state.restaurantProfile || {}
   const isEdit = !!state.restaurantProfile
   return `
+    ${isEdit ? '' : `
+      <section class="panel value-prop">
+        <h3>なぜこのアプリ？</h3>
+        <p>中央卸売市場で直接買い付けるには資格や実績が必要で、個人店にはハードルが高いのが実情です。かといって、出品中の農家を毎回1件ずつ見比べて選ぶのも大変です。</p>
+        <p>このアプリでは、欲しい食材・量を伝えるだけで、近隣の複数の農家から必要な分だけをAIが自動で組み合わせます。1軒で足りなければ、他の農家を足して希望量ちょうどに。</p>
+      </section>
+    `}
     <section class="panel">
       <h2>${isEdit ? '受取条件の編集' : '① 受取条件を設定'}</h2>
       <p class="hint">この画面の目的は店舗の登録ではなく、「欲しい食材・数量・受取条件を伝えること」の準備です。ここで決めた内容は次の②の初期値になり、自然文で省略しても自動的に補われます。あとからいつでも変更できます。</p>
@@ -923,6 +936,13 @@ function renderProducerRegister() {
   const p = state.producerProfile || {}
   const isEdit = !!state.producerProfile
   return `
+    ${isEdit ? '' : `
+      <section class="panel value-prop">
+        <h3>なぜこのアプリ？</h3>
+        <p>卸売市場では、形が不揃いな規格外品や、見積もりより多く穫れた余剰分は、値段がつかず出荷できないことがあります。</p>
+        <p>このアプリでは、そうした規格外・余剰の食材にも自分で値段をつけて、近隣の飲食店に直接販売できます。捨てるはずだったものが、収入になります。</p>
+      </section>
+    `}
     <section class="panel">
       <h2>${isEdit ? '農園情報の編集' : '① 入口:農園情報の登録'}</h2>
       <p class="hint">初回のみ入力します。次回以降はこの端末で自動的にログイン状態が保たれ、この画面は表示されません。</p>
