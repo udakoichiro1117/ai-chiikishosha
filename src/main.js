@@ -962,7 +962,6 @@ function activeNavKey() {
   if (state.screen === 'producer' || state.screen === 'producer-register') return 'producer'
   if (state.screen === 'rescue') return 'rescue'
   if (state.screen === 'orders') return 'orders'
-  if (state.screen === 'records') return 'records'
   if (state.screen === 'settings') return 'settings'
   return 'home'
 }
@@ -983,7 +982,6 @@ function renderSidebar() {
         ${item('rescue', '⏰', 'おまかせ救済')}
         ${item('producer', '🌱', '出品')}
         ${item('orders', '📦', '注文')}
-        ${item('records', '📖', '記録')}
         ${item('settings', '⚙️', '設定')}
       </div>
     </nav>
@@ -1002,7 +1000,6 @@ function renderScreen() {
     case 'rescue': return `<div class="role-restaurant">${renderRescue()}</div>`
     case 'producer': return `<div class="role-producer">${renderProducer()}</div>`
     case 'orders': return renderOrders()
-    case 'records': return renderRecords()
     case 'settings': return renderSettings()
     default: return renderHome()
   }
@@ -1601,20 +1598,6 @@ function renderProducer() {
   `
 }
 
-function renderRecords() {
-  return `
-    <section class="panel">
-      <h2>記録</h2>
-      <p class="hint">依頼した仕入れの状況は「📦 注文」タブでご確認いただけます。ここでは登録されている生産者の出品状況をまとめて確認できます。</p>
-    </section>
-    <section class="panel">
-      <h3>登録済みの生産者出品一覧</h3>
-      ${renderProducersStatus()}
-      ${renderProducerTable()}
-    </section>
-  `
-}
-
 // 注文(orders)もlistingsと同じく全端末共有で取得する。読み込み中・失敗時の表示と
 // 手動更新ボタンはrenderProducersStatus()と同じ作法。
 function renderOrdersStatus() {
@@ -1896,8 +1879,8 @@ function attachEvents() {
   document.querySelectorAll('[data-nav]').forEach(btn => {
     btn.addEventListener('click', () => {
       const key = btn.dataset.nav
-      // 仕入れ・出品・おまかせ救済・記録は他端末の出品状況に関わる画面なので、開くたびに最新化する。
-      if (['restaurant', 'producer', 'rescue', 'records'].includes(key)) fetchListings()
+      // 仕入れ・出品・おまかせ救済は他端末の出品状況に関わる画面なので、開くたびに最新化する。
+      if (['restaurant', 'producer', 'rescue'].includes(key)) fetchListings()
       if (['restaurant', 'producer', 'orders'].includes(key)) fetchOrders()
       if (key === 'producer') fetchHubs() // 共通受渡拠点の選択肢は出品登録(生産者)でのみ使う
       if (key === 'restaurant') goToRestaurant()
