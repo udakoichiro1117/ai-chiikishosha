@@ -22,6 +22,8 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  ordersError: string|null,
  *  orderSubmitting: boolean,
  *  amendingLineKey: string|null,
+ *  hubs: any[],
+ *  showNewHubForm: boolean,
  *  requestText: string,
  *  parsed: {item:string,quantity:number,unit:string,neededDate:string,region:string,allowOffGrade:boolean,priceLimit:number|null,source:string}|null,
  *  result: any|null,
@@ -49,7 +51,7 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, screen: 'home' }
+      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, hubs: [], showNewHubForm: false, screen: 'home' }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
@@ -74,6 +76,8 @@ function loadState() {
     ordersError: null,
     orderSubmitting: false,
     amendingLineKey: null,
+    hubs: [],
+    showNewHubForm: false,
     requestText: buildDefaultRequestText(),
     parsed: null,
     result: null,
@@ -85,7 +89,7 @@ function saveState() {
   try {
     // flashMessageは一時的なUI通知、producers/orders関連はサーバーが正、*Submitting等は送信中フラグなので、
     // いずれも保存対象から除く(保存すると、例えば送信中のまま再読み込みした際に固まって見える)。
-    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, myOrders, incomingOrders, ordersLoading, ordersError, orderSubmitting, amendingLineKey, ...persisted } = state
+    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, myOrders, incomingOrders, ordersLoading, ordersError, orderSubmitting, amendingLineKey, hubs, showNewHubForm, ...persisted } = state
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted))
   } catch (e) { /* 保存できなくても画面表示は継続する */ }
 }
@@ -157,6 +161,30 @@ function renderGeoStatus(profile) {
   return ''
 }
 
+// 共通受渡拠点の選択UI。固定リストではなく、生産者・飲食店が自分たちで登録していく
+// 共有リストなので、既存の拠点から選ぶか、その場で新しい拠点を登録できるようにする。
+function renderHubPicker() {
+  const options = state.hubs.map(h => `<option value="${h.id}">${escapeHtml(h.name)}(${escapeHtml(h.address)})</option>`).join('')
+  return `
+    <div class="hub-picker">
+      <label>共通受渡拠点(拠点受け渡しを選んだ場合のみ使います)
+        <select form="listing-step3-form" name="hubId">
+          <option value="">— 拠点を選ぶ —</option>
+          ${options}
+        </select>
+      </label>
+      <button type="button" id="new-hub-toggle" class="ghost-btn">${state.showNewHubForm ? 'キャンセル' : '+ 近くに使える拠点が無い場合はここから登録'}</button>
+      ${state.showNewHubForm ? `
+        <div class="hub-new-form">
+          <label>拠点名<input id="new-hub-name" type="text" placeholder="例:能勢町 道の駅前" /></label>
+          <label>住所・目印<input id="new-hub-address" type="text" placeholder="例:大阪府豊能郡能勢町○○" /></label>
+          <button type="button" id="new-hub-submit" class="table-btn">この内容で登録する</button>
+        </div>
+      ` : ''}
+    </div>
+  `
+}
+
 // 出品一覧の「鮮度期限」セル。期限までの残り日数に応じて緊急度を色分け表示する。
 function renderFreshnessCell(p) {
   const expiryDate = p.expiryDate || computeExpiryDate(p.availableDate, p.item)
@@ -217,6 +245,53 @@ async function fetchOrders() {
     setState({ myOrders: mine.orders, incomingOrders: incoming.orders, ordersLoading: false, ordersError: null })
   } catch (e) {
     setState({ ordersLoading: false, ordersError: '注文データの取得に失敗しました。通信状況を確認して、再読み込みしてください。' })
+  }
+}
+
+// 共通受渡拠点(Hub)は固定リストではなく、実際に使う生産者・飲食店が追記していく共有リスト。
+async function fetchHubs() {
+  try {
+    const res = await fetch('/api/hubs')
+    if (!res.ok) throw new Error('api not ok')
+    const { hubs } = await res.json()
+    setState({ hubs })
+  } catch (e) {
+    // 拠点一覧が取れなくても出品登録自体は続けられるようにし、エラーで止めない。
+  }
+}
+
+async function handleCreateHub(name, address) {
+  try {
+    const res = await fetch('/api/hubs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, address, createdBy: getDeviceId() })
+    })
+    if (!res.ok) throw new Error('api not ok')
+    const { hub } = await res.json()
+    setState({ hubs: [...state.hubs, hub] })
+    return hub
+  } catch (e) {
+    showFlash('拠点の登録に失敗しました。通信状況を確認してください。')
+    return null
+  }
+}
+
+function handleNewHubToggle() {
+  setState({ showNewHubForm: !state.showNewHubForm })
+}
+
+async function handleNewHubSubmit() {
+  const name = document.getElementById('new-hub-name')?.value.trim() || ''
+  const address = document.getElementById('new-hub-address')?.value.trim() || ''
+  if (!name || !address) {
+    showFlash('拠点名と住所の両方を入力してください')
+    return
+  }
+  const hub = await handleCreateHub(name, address)
+  if (hub) {
+    setState({ showNewHubForm: false })
+    showFlash(`拠点「${hub.name}」を登録しました。一覧から選んでください`)
   }
 }
 
@@ -710,6 +785,17 @@ async function handleListingPhotoChange(input) {
 
 async function handleListingStepThreeSubmit(form) {
   const data = new FormData(form)
+  const deliveryMethod = String(data.get('deliveryMethod') || '')
+  const hubId = String(data.get('hubId') || '')
+
+  if (deliveryMethod === 'hub') {
+    if (!hubId) {
+      setState({ listingSubmitError: '共通受渡拠点を選択してください(無ければ新しい拠点を登録できます)' })
+      return
+    }
+  }
+  const hub = state.hubs.find(h => h.id === hubId)
+
   const payload = {
     ownerId: getDeviceId(),
     farmName: state.producerProfile?.farmName || '新規農家',
@@ -724,9 +810,11 @@ async function handleListingStepThreeSubmit(form) {
     isOffGrade: data.get('isOffGrade') === 'on',
     offGradeReason: String(data.get('offGradeReason') || ''),
     stockStatus: String(data.get('stockStatus') || ''),
-    deliveryMethod: String(data.get('deliveryMethod') || ''),
-    deliveryLocation: String(data.get('deliveryLocation') || ''),
+    deliveryMethod,
+    // 拠点受け渡しの場合は、選んだ拠点の名前・住所をそのまま受渡場所として使う(自由記述を上書き)。
+    deliveryLocation: deliveryMethod === 'hub' && hub ? `${hub.name}(${hub.address})` : String(data.get('deliveryLocation') || ''),
     deliveryTime: String(data.get('deliveryTime') || ''),
+    hubId: deliveryMethod === 'hub' ? hubId : null,
     minQuantity: Number(data.get('minQuantity') || 1),
     incrementStep: Number(data.get('incrementStep') || 1),
     deliveryFee: Number(data.get('deliveryFee') || 0)
@@ -1350,10 +1438,12 @@ function renderListingStepThree() {
         <label>規格外理由(任意)<input name="offGradeReason" type="text" placeholder="形の不揃い" value="${escapeHtml(d.offGradeReason || '')}" /></label>
       </form>
       <fieldset class="delivery-method-choice">
-        <legend>受け渡し方法(どちらか選んでください)</legend>
+        <legend>受け渡し方法(いずれか選んでください)</legend>
         <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="deliver" required /> 🚚 自分で配達する</label>
         <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="pickup" required /> 🏃 お店に取りに来てもらう</label>
+        <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="hub" required /> 🏠 共通受渡拠点で渡す</label>
       </fieldset>
+      ${renderHubPicker()}
       <fieldset class="delivery-method-choice">
         <legend>在庫状況(どちらか選んでください)</legend>
         <label class="checkbox"><input form="listing-step3-form" type="radio" name="stockStatus" value="confirmed" required /> ✅ もう収穫済み(在庫あり・すぐ出せる)</label>
@@ -1502,6 +1592,9 @@ function renderDeliveryMethodLabel(d) {
     return `🚚 生産者が配達${d.deliveryTime ? `(${escapeHtml(d.deliveryTime)})` : ''}`
   }
   const place = [d.deliveryLocation, d.deliveryTime].filter(Boolean).map(escapeHtml).join('・')
+  if (d.deliveryMethod === 'hub') {
+    return `🏠 共通受渡拠点${place ? `(${place})` : ''}`
+  }
   return `🏃 お店が引き取り${place ? `(${place})` : ''}`
 }
 
@@ -1689,6 +1782,7 @@ function attachEvents() {
       // 仕入れ・出品・おまかせ救済・記録は他端末の出品状況に関わる画面なので、開くたびに最新化する。
       if (['restaurant', 'producer', 'rescue', 'records'].includes(key)) fetchListings()
       if (['restaurant', 'producer', 'orders'].includes(key)) fetchOrders()
+      if (key === 'producer') fetchHubs() // 共通受渡拠点の選択肢は出品登録(生産者)でのみ使う
       if (key === 'restaurant') goToRestaurant()
       else if (key === 'producer') goToProducer()
       else setState({ screen: key })
@@ -1716,6 +1810,8 @@ function attachEvents() {
       handleOrderLineAmendSubmit(form.dataset.orderId, form.dataset.listingId, form)
     })
   })
+  document.getElementById('new-hub-toggle')?.addEventListener('click', handleNewHubToggle)
+  document.getElementById('new-hub-submit')?.addEventListener('click', handleNewHubSubmit)
   document.querySelectorAll('[data-goto]').forEach(btn => {
     btn.addEventListener('click', () => setState({ screen: btn.dataset.goto }))
   })
@@ -1816,3 +1912,4 @@ function attachEvents() {
 render()
 fetchListings()
 fetchOrders()
+fetchHubs()

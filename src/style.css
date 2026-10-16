@@ -338,6 +338,25 @@ textarea, input[type=text], input[type=number], input[type=date], select {
 .delivery-method-choice legend { font-size: 0.82rem; color: var(--muted); padding: 0 4px; }
 .alloc-delivery { font-size: 0.78rem; color: var(--muted); }
 
+.hub-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.hub-picker label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+.hub-new-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.hub-new-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--muted); }
+
 .zip-row { display: flex; gap: 8px; align-items: center; }
 .zip-row input { flex: 1; min-width: 0; }
 .zip-row button { flex: none; white-space: nowrap; }
