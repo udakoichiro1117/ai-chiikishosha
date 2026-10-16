@@ -307,12 +307,13 @@ body {
 .settings-switch-btn[data-settings-role="producer"] { border-color: var(--producer-accent); color: var(--producer-accent); }
 .settings-switch-btn[data-settings-role="producer"].active { background: var(--producer-accent); color: #fff; }
 
-textarea, input[type=text], input[type=number], input[type=date], select {
+textarea, input[type=text], input[type=number], input[type=date], input[type=email], select {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-size: 0.95rem;
+  /* 16px未満だとiOS Safariが入力欄フォーカス時に自動でズームしてしまうため、16px以上にする */
+  font-size: 16px;
   font-family: inherit;
 }
 
@@ -590,7 +591,7 @@ tr.unavailable { opacity: 0.5; }
     width: 100%;
     height: auto;
     flex-direction: row;
-    padding: 6px 4px;
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
     border-right: none;
     border-top: 1px solid var(--border);
     z-index: 20;
@@ -599,7 +600,8 @@ tr.unavailable { opacity: 0.5; }
   .sidebar-nav { flex-direction: row; flex: 1; justify-content: space-between; }
   .nav-item { flex-direction: column; gap: 2px; padding: 6px 4px; flex: 1; font-size: 0.68rem; }
   .nav-label { white-space: nowrap; }
-  .shell-main { padding-bottom: 64px; }
+  /* ホームインジケーターのあるiPhone等でも下部タブバーに隠れないよう、セーフエリア分を足す */
+  .shell-main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 
   .hero-compact { padding: 14px 18px; }
   .cta-row { flex-direction: column; }
