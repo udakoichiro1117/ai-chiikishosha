@@ -22,6 +22,10 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  ordersError: string|null,
  *  orderSubmitting: boolean,
  *  amendingLineKey: string|null,
+ *  chatThreads: Record<string, any[]>,
+ *  openChatKey: string|null,
+ *  chatLoading: boolean,
+ *  chatSubmitting: boolean,
  *  hubs: any[],
  *  showNewHubForm: boolean,
  *  userEmail: string|null,
@@ -56,7 +60,7 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, hubs: [], showNewHubForm: false, userEmail: getUserEmail(), userRole: getUserRole(), authSubmitting: false, authLinkSent: false, authError: null, screen: 'home' }
+      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, chatThreads: {}, openChatKey: null, chatLoading: false, chatSubmitting: false, hubs: [], showNewHubForm: false, userEmail: getUserEmail(), userRole: getUserRole(), authSubmitting: false, authLinkSent: false, authError: null, screen: 'home' }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
@@ -81,6 +85,10 @@ function loadState() {
     ordersError: null,
     orderSubmitting: false,
     amendingLineKey: null,
+    chatThreads: {},
+    openChatKey: null,
+    chatLoading: false,
+    chatSubmitting: false,
     hubs: [],
     showNewHubForm: false,
     userEmail: getUserEmail(),
@@ -99,7 +107,7 @@ function saveState() {
   try {
     // flashMessageは一時的なUI通知、producers/orders関連はサーバーが正、*Submitting等は送信中フラグなので、
     // いずれも保存対象から除く(保存すると、例えば送信中のまま再読み込みした際に固まって見える)。
-    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, myOrders, incomingOrders, ordersLoading, ordersError, orderSubmitting, amendingLineKey, hubs, showNewHubForm, authSubmitting, authLinkSent, authError, ...persisted } = state
+    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, myOrders, incomingOrders, ordersLoading, ordersError, orderSubmitting, amendingLineKey, chatThreads, openChatKey, chatLoading, chatSubmitting, hubs, showNewHubForm, authSubmitting, authLinkSent, authError, ...persisted } = state
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted))
   } catch (e) { /* 保存できなくても画面表示は継続する */ }
 }
@@ -737,14 +745,16 @@ async function handleOrderCancel(orderId) {
   }
 }
 
-function amendLineKey(orderId, listingId) {
+// 注文内の1農家分(line)を一意に特定するキー。事後修正フォームの開閉、
+// チャットスレッドの特定など、line単位のUI状態を扱う箇所で共通して使う。
+function orderLineKey(orderId, listingId) {
   return `${orderId}:${listingId}`
 }
 
 // 承認後に天候等で実際に用意できる量が減った場合、生産者が承認済みlineを減額できる。
 // インライン編集フォームの開閉だけを行う(送信はhandleOrderLineAmendSubmitで行う)。
 function handleOrderLineAmendToggle(orderId, listingId) {
-  const key = amendLineKey(orderId, listingId)
+  const key = orderLineKey(orderId, listingId)
   setState({ amendingLineKey: state.amendingLineKey === key ? null : key })
 }
 
@@ -776,6 +786,56 @@ async function handleOrderLineAmendSubmit(orderId, listingId, form) {
   } catch (e) {
     setState({ incomingOrders: prev })
     showFlash('数量の修正に失敗しました。通信状況を確認してください。')
+  }
+}
+
+// 注文1件の中の1農家分(line)ごとのチャット(メルカリの取引チャットをイメージ)。
+// やり取りできるのはその当事者2者(依頼した飲食店・その農家)だけで、
+// 一度に開けるスレッドは1つに絞る(amendingLineKeyと同じ作法)。
+function handleChatToggle(orderId, listingId) {
+  const key = orderLineKey(orderId, listingId)
+  if (state.openChatKey === key) {
+    setState({ openChatKey: null })
+    return
+  }
+  setState({ openChatKey: key })
+  if (!state.chatThreads[key]) fetchChatThread(orderId, listingId)
+}
+
+async function fetchChatThread(orderId, listingId) {
+  const key = orderLineKey(orderId, listingId)
+  setState({ chatLoading: true })
+  try {
+    const res = await fetch(`/api/messages?orderId=${encodeURIComponent(orderId)}&listingId=${encodeURIComponent(listingId)}&ownerId=${encodeURIComponent(getOwnerId())}`)
+    if (!res.ok) throw new Error('api not ok')
+    const { messages } = await res.json()
+    setState({ chatThreads: { ...state.chatThreads, [key]: messages }, chatLoading: false })
+  } catch (e) {
+    setState({ chatLoading: false })
+    showFlash('メッセージの取得に失敗しました。通信状況を確認してください。')
+  }
+}
+
+async function handleChatSend(orderId, listingId, form) {
+  const key = orderLineKey(orderId, listingId)
+  const text = String(new FormData(form).get('text') || '').trim()
+  if (!text) return
+  setState({ chatSubmitting: true })
+  try {
+    const res = await fetch(`/api/messages?orderId=${encodeURIComponent(orderId)}&listingId=${encodeURIComponent(listingId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ownerId: getOwnerId(), text })
+    })
+    if (!res.ok) throw new Error('api not ok')
+    const { message } = await res.json()
+    setState({
+      chatThreads: { ...state.chatThreads, [key]: [...(state.chatThreads[key] || []), message] },
+      chatSubmitting: false
+    })
+  } catch (e) {
+    setState({ chatSubmitting: false })
+    showFlash('メッセージの送信に失敗しました。通信状況を確認してください。')
   }
 }
 
@@ -1715,13 +1775,21 @@ function renderMyOrderCard(order) {
         <span class="hint">${new Date(order.createdAt).toLocaleString('ja-JP')}</span>
       </div>
       <ul class="order-line-list">
-        ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(effectiveLineAmount(l))}${escapeHtml(order.unit)}(${fmtNum(effectiveLineAmount(l) * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}:${renderOrderLineLabel(l.status)}${renderAmendInfo(l, order.unit)}</li>`).join('')}
+        ${order.lines.map(l => renderMyOrderLine(order, l)).join('')}
       </ul>
       <div class="order-total">合計 ${fmtNum(order.totalQuantity)}${escapeHtml(order.unit)}・${fmtNum(order.totalPrice)}円</div>
       ${order.lines.some(l => l.status === 'pending') && order.responseDeadline ? `<p class="hint">返信期限:${new Date(order.responseDeadline).toLocaleString('ja-JP')}</p>` : ''}
       ${cancellable ? `<div class="actions"><button type="button" data-order-cancel="${order.id}" class="table-btn table-btn-danger">依頼を取り消す</button></div>` : ''}
     </div>
   `
+}
+
+function renderMyOrderLine(order, l) {
+  return `<li>
+    ${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(effectiveLineAmount(l))}${escapeHtml(order.unit)}(${fmtNum(effectiveLineAmount(l) * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}:${renderOrderLineLabel(l.status)}${renderAmendInfo(l, order.unit)}
+    ${renderChatToggleButton(order, l)}
+    ${renderChatPanel(order, l)}
+  </li>`
 }
 
 function renderIncomingOrders() {
@@ -1755,7 +1823,7 @@ function renderIncomingOrderCard(order, deviceId) {
 // 「数量を修正する」を出す。pending中は従来通り承認/却下ボタンを出す。
 function renderIncomingOrderLine(order, l, deviceId) {
   const mine = l.ownerId === deviceId
-  const lineKey = amendLineKey(order.id, l.listingId)
+  const lineKey = orderLineKey(order.id, l.listingId)
   const isAmending = state.amendingLineKey === lineKey
 
   let actionHtml = `:${renderOrderLineLabel(l.status)}${mine ? '' : '(他の農家の出品)'}`
@@ -1782,7 +1850,53 @@ function renderIncomingOrderLine(order, l, deviceId) {
     </form>
   ` : ''
 
-  return `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(effectiveLineAmount(l))}${escapeHtml(order.unit)}(${fmtNum(effectiveLineAmount(l) * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}${actionHtml}${renderAmendInfo(l, order.unit)}${amendForm}</li>`
+  return `<li>
+    ${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(effectiveLineAmount(l))}${escapeHtml(order.unit)}(${fmtNum(effectiveLineAmount(l) * l.unitPrice)}円)・${renderDeliveryMethodLabel(l)}${actionHtml}${renderAmendInfo(l, order.unit)}${amendForm}
+    ${renderChatToggleButton(order, l)}
+    ${renderChatPanel(order, l)}
+  </li>`
+}
+
+// 注文1件の中の1農家分(line)ごとのチャット(メルカリの取引チャットをイメージ)。
+// 飲食店側・生産者側どちらの一覧からも同じ見た目で開けるよう共通化する。
+function renderChatToggleButton(order, l) {
+  const key = orderLineKey(order.id, l.listingId)
+  const open = state.openChatKey === key
+  const count = state.chatThreads[key]?.length
+  const label = open ? '閉じる' : `💬 メッセージ${count ? `(${count})` : ''}`
+  return `<button type="button" data-chat-toggle data-order-id="${order.id}" data-listing-id="${l.listingId}" class="table-btn chat-toggle-btn">${label}</button>`
+}
+
+function renderChatMessage(m) {
+  const mine = m.senderId === getOwnerId()
+  const roleLabel = m.senderRole === 'restaurant' ? '飲食店' : '生産者'
+  return `
+    <div class="chat-bubble ${mine ? 'chat-bubble-mine' : ''}">
+      <div class="chat-bubble-meta">${mine ? '自分' : roleLabel}・${new Date(m.createdAt).toLocaleString('ja-JP')}</div>
+      <div class="chat-bubble-text">${escapeHtml(m.text)}</div>
+    </div>
+  `
+}
+
+function renderChatPanel(order, l) {
+  const key = orderLineKey(order.id, l.listingId)
+  if (state.openChatKey !== key) return ''
+  const messages = state.chatThreads[key] || []
+  return `
+    <div class="chat-panel">
+      <div class="chat-messages">
+        ${state.chatLoading && messages.length === 0
+          ? '<p class="hint">読み込み中…</p>'
+          : messages.length === 0
+            ? '<p class="hint">まだメッセージはありません。受け渡しの相談などに使えます。</p>'
+            : messages.map(renderChatMessage).join('')}
+      </div>
+      <form class="chat-form" data-order-id="${order.id}" data-listing-id="${l.listingId}">
+        <input type="text" name="text" placeholder="メッセージを入力" maxlength="2000" required />
+        <button type="submit" class="table-btn primary" ${state.chatSubmitting ? 'disabled' : ''}>${state.chatSubmitting ? '送信中…' : '送信'}</button>
+      </form>
+    </div>
+  `
 }
 
 function renderSettingsSwitch() {
@@ -1956,6 +2070,17 @@ function attachEvents() {
       handleOrderLineAmendSubmit(form.dataset.orderId, form.dataset.listingId, form)
     })
   })
+  document.querySelectorAll('[data-chat-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => handleChatToggle(btn.dataset.orderId, btn.dataset.listingId))
+  })
+  document.querySelectorAll('.chat-form').forEach(form => {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault()
+      if (!form.reportValidity()) return
+      handleChatSend(form.dataset.orderId, form.dataset.listingId, form)
+    })
+  })
+  document.querySelectorAll('.chat-messages').forEach(el => { el.scrollTop = el.scrollHeight })
   document.getElementById('new-hub-toggle')?.addEventListener('click', handleNewHubToggle)
   document.getElementById('new-hub-submit')?.addEventListener('click', handleNewHubSubmit)
   document.getElementById('auth-request-submit')?.addEventListener('click', (e) => {
