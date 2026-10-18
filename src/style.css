@@ -186,28 +186,40 @@ body {
   font-size: 0.82rem; cursor: pointer; text-decoration: underline;
 }
 
-/* ---- ホーム: どちらで使いますか ---- */
-.cta-section { display: flex; flex-direction: column; gap: 10px; }
-.cta-label { margin: 0; font-weight: 700; font-size: 0.95rem; }
-.cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
-.cta-col { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 6px; }
-.cta-btn {
-  width: 100%;
+/* ---- ホーム: どちらで使いますか(役割選択ゲート) ---- */
+.role-gate { display: flex; flex-direction: column; gap: 10px; }
+.role-gate-label { margin: 0; font-weight: 700; font-size: 0.95rem; }
+.role-gate-blocks {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 16px 20px;
-  border-radius: 14px;
-  font-size: 0.95rem;
+  flex-direction: column;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.role-gate-block {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-height: 160px;
+  padding: 26px 96px 26px 22px;
+  border: none;
+  border-radius: 0;
+  color: #fff;
+  text-align: left;
   cursor: pointer;
 }
-.cta-why { margin: 0; padding: 0 4px; font-size: 0.78rem; color: var(--muted); }
-.cta-icon { font-size: 1.2rem; }
-.cta-text { flex: 1; text-align: left; }
-.cta-primary { background: var(--restaurant-accent); color: #fff; border: 1px solid var(--restaurant-accent); }
-.cta-primary:hover { opacity: 0.92; }
-.cta-outline { background: var(--producer-soft); color: var(--producer-accent); border: 1px solid var(--producer-accent); }
-.cta-outline:hover { background: var(--producer-accent); color: #fff; }
+.role-gate-block:hover { filter: brightness(1.05); }
+.role-gate-restaurant { background: var(--restaurant-accent); }
+.role-gate-producer { background: var(--producer-accent); }
+.role-gate-decor { position: absolute; right: 18px; bottom: 14px; font-size: 2.6rem; opacity: 0.35; }
+.role-gate-title { font-size: 1.4rem; font-weight: 700; }
+.role-gate-action { font-size: 0.92rem; font-weight: 600; }
+.role-gate-arrow { margin-left: 2px; }
+.role-gate-why { margin: 0; font-size: 0.78rem; opacity: 0.85; max-width: 34ch; }
+.role-gate-login-hint { margin: 2px 0 0; font-size: 0.82rem; color: var(--muted); }
 
 .demo-fill-row { margin-top: 0; margin-bottom: 12px; }
 .ghost-btn {
@@ -641,7 +653,7 @@ tr.unavailable { opacity: 0.5; }
   .shell-main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 
   .hero-compact { padding: 14px 18px; }
-  .cta-row { flex-direction: column; }
+  .role-gate-block { padding: 22px 80px 22px 18px; min-height: 140px; }
   .draft-card { flex-direction: column; align-items: stretch; }
   .draft-actions { justify-content: flex-end; }
 }

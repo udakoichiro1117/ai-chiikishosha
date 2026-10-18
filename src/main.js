@@ -1152,24 +1152,25 @@ function renderHome() {
       </section>
     ` : ''}
 
-    <section class="cta-section">
-      <p class="cta-label">${state.userRole ? '' : 'どちらで使いますか？'}</p>
-      <div class="cta-row">
+    <section class="role-gate">
+      <p class="role-gate-label">${state.userRole ? '' : 'どちらで使いますか？'}</p>
+      <div class="role-gate-blocks">
         ${state.userRole !== 'producer' ? `
-        <div class="cta-col">
-          <button class="cta-btn cta-primary" data-nav="restaurant">
-            <span class="cta-icon">🛒</span><span class="cta-text">仕入れ案を作る(飲食店)</span><span class="cta-arrow">→</span>
-          </button>
-          <p class="cta-why">欲しい量を伝えるだけで、近隣の複数の農家から自動で組み合わせます</p>
-        </div>` : ''}
+        <button class="role-gate-block role-gate-restaurant" data-nav="restaurant">
+          <span class="role-gate-decor" aria-hidden="true">🏪</span>
+          <span class="role-gate-title">飲食店</span>
+          <span class="role-gate-action">仕入れ案を作る<span class="role-gate-arrow">→</span></span>
+          <p class="role-gate-why">欲しい量を伝えるだけで、近隣の複数の農家から自動で組み合わせます</p>
+        </button>` : ''}
         ${state.userRole !== 'restaurant' ? `
-        <div class="cta-col">
-          <button class="cta-btn cta-outline" data-nav="producer">
-            <span class="cta-icon">🌱</span><span class="cta-text">販売できるものを登録(生産者)</span><span class="cta-plus">＋</span>
-          </button>
-          <p class="cta-why">規格外・余剰品にも、自分で値段をつけて出品できます</p>
-        </div>` : ''}
+        <button class="role-gate-block role-gate-producer" data-nav="producer">
+          <span class="role-gate-decor" aria-hidden="true">🌾</span>
+          <span class="role-gate-title">生産者</span>
+          <span class="role-gate-action">今日出せる量を登録する<span class="role-gate-arrow">→</span></span>
+          <p class="role-gate-why">規格外・余剰品にも、自分で値段をつけて出品できます</p>
+        </button>` : ''}
       </div>
+      ${!state.userEmail ? `<p class="role-gate-login-hint">登録済みの方は<button type="button" class="link-btn" data-nav="settings">ログイン</button>から</p>` : ''}
     </section>
 
     <details class="how-it-works">
@@ -1945,16 +1946,25 @@ function renderAccountCard() {
       </section>
     `
   }
+  // 直近使っていた役割が分かっていれば(仕入れ・出品のどちらかを一度でも開いていれば)、
+  // それを前提にログインフォームを出し分ける(飲食店/生産者でログイン画面を分けたい、という
+  // 意図を汲み、毎回ラジオボタンで選び直させない)。役割がまだ不明な場合のみ選択式にする。
+  const role = effectiveRole()
   return `
     <section class="panel">
       <h3>アカウント</h3>
       <p class="hint">メールアドレスを登録すると、機種変更やブラウザのデータ削除があっても、別の端末から自分の出品・注文にアクセスできるようになります(パスワードは不要です)。</p>
       <form id="auth-request-form" class="form-grid">
         <label>メールアドレス<input type="email" name="email" required placeholder="例:mikami@example.com" /></label>
-        <label class="checkbox"><input type="radio" name="role" value="restaurant" checked /> 飲食店として使う</label>
-        <label class="checkbox"><input type="radio" name="role" value="producer" /> 生産者として使う</label>
+        ${role ? `
+          <input type="hidden" name="role" value="${role}" />
+          <p class="hint">${role === 'restaurant' ? '🛒 飲食店として登録します' : '🌾 生産者として登録します'}</p>
+        ` : `
+          <label class="checkbox"><input type="radio" name="role" value="restaurant" checked /> 飲食店として使う</label>
+          <label class="checkbox"><input type="radio" name="role" value="producer" /> 生産者として使う</label>
+        `}
       </form>
-      <p class="hint">※ 一度登録した役割は後から変更できません(生産者・飲食店どちらも試したい場合は、別のメールアドレスでご登録ください)。</p>
+      <p class="hint">※ 一度登録した役割は後から変更できません${role ? '' : '(生産者・飲食店どちらも試したい場合は、別のメールアドレスでご登録ください)'}。</p>
       ${state.authError ? `<p class="warn">${escapeHtml(state.authError)}</p>` : ''}
       <div class="actions">
         <button id="auth-request-submit" class="primary" ${state.authSubmitting ? 'disabled' : ''}>${state.authSubmitting ? '送信しています…' : 'ログインリンクを送る'}</button>
