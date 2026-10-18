@@ -28,6 +28,8 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  chatSubmitting: boolean,
  *  hubs: any[],
  *  showNewHubForm: boolean,
+ *  demoSnapshotStatus: {configured:boolean,exists:boolean,savedAt:string|null}|null,
+ *  demoSnapshotBusy: boolean,
  *  userEmail: string|null,
  *  userRole: 'restaurant'|'producer'|null,
  *  authSubmitting: boolean,
@@ -60,7 +62,7 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, chatThreads: {}, openChatKey: null, chatLoading: false, chatSubmitting: false, hubs: [], showNewHubForm: false, userEmail: getUserEmail(), userRole: getUserRole(), authSubmitting: false, authLinkSent: false, authError: null, screen: 'home' }
+      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, chatThreads: {}, openChatKey: null, chatLoading: false, chatSubmitting: false, hubs: [], showNewHubForm: false, demoSnapshotStatus: null, demoSnapshotBusy: false, userEmail: getUserEmail(), userRole: getUserRole(), authSubmitting: false, authLinkSent: false, authError: null, screen: 'home' }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
@@ -91,6 +93,8 @@ function loadState() {
     chatSubmitting: false,
     hubs: [],
     showNewHubForm: false,
+    demoSnapshotStatus: null,
+    demoSnapshotBusy: false,
     userEmail: getUserEmail(),
     userRole: getUserRole(),
     authSubmitting: false,
@@ -107,7 +111,7 @@ function saveState() {
   try {
     // flashMessageは一時的なUI通知、producers/orders関連はサーバーが正、*Submitting等は送信中フラグなので、
     // いずれも保存対象から除く(保存すると、例えば送信中のまま再読み込みした際に固まって見える)。
-    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, myOrders, incomingOrders, ordersLoading, ordersError, orderSubmitting, amendingLineKey, chatThreads, openChatKey, chatLoading, chatSubmitting, hubs, showNewHubForm, authSubmitting, authLinkSent, authError, ...persisted } = state
+    const { flashMessage, producers, producersLoading, producersError, listingSubmitting, listingSubmitError, myOrders, incomingOrders, ordersLoading, ordersError, orderSubmitting, amendingLineKey, chatThreads, openChatKey, chatLoading, chatSubmitting, hubs, showNewHubForm, demoSnapshotStatus, demoSnapshotBusy, authSubmitting, authLinkSent, authError, ...persisted } = state
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted))
   } catch (e) { /* 保存できなくても画面表示は継続する */ }
 }
@@ -200,11 +204,21 @@ function renderGeoStatus(profile) {
 
 // 共通受渡拠点の選択UI。固定リストではなく、生産者・飲食店が自分たちで登録していく
 // 共有リストなので、既存の拠点から選ぶか、その場で新しい拠点を登録できるようにする。
+// 拠点ごとに、現在その拠点を使っている出品数を数える。名前・住所だけでは
+// 「ここを選んで大丈夫か」の判断材料が無いため、他の出品の利用状況を手がかりとして示す。
 function renderHubPicker() {
-  const options = state.hubs.map(h => `<option value="${h.id}">${escapeHtml(h.name)}(${escapeHtml(h.address)})</option>`).join('')
+  const usageCounts = {}
+  for (const p of state.producers) {
+    if (p.hubId) usageCounts[p.hubId] = (usageCounts[p.hubId] || 0) + 1
+  }
+  const options = state.hubs.map(h => {
+    const count = usageCounts[h.id] || 0
+    const usage = count > 0 ? `・他の出品${count}件が利用中` : '・まだ利用している出品はありません'
+    return `<option value="${h.id}">${escapeHtml(h.name)}(${escapeHtml(h.address)})${usage}</option>`
+  }).join('')
   return `
     <div class="hub-picker">
-      <label>共通受渡拠点(拠点受け渡しを選んだ場合のみ使います)
+      <label>共通受渡拠点(拠点受け渡しを選んだ場合のみ使います。他の出品の利用件数が多いほど、飲食店が1か所でまとめて受け取りやすくなります)
         <select form="listing-step3-form" name="hubId">
           <option value="">— 拠点を選ぶ —</option>
           ${options}
@@ -368,6 +382,66 @@ async function handleNewHubSubmit() {
   if (hub) {
     setState({ showNewHubForm: false })
     showFlash(`拠点「${hub.name}」を登録しました。一覧から選んでください`)
+  }
+}
+
+// デモ運営者向け: 出品・注文・拠点・チャットは全利用者が同じ共有ストアを見ているため、
+// 発表直前に誰かの操作でデモ用データが変わってしまっても、直前に保存した状態へ戻せるように
+// する(api/snapshot.jsのコメント参照)。管理用キーはDEMO_ADMIN_KEY環境変数と照合される。
+async function fetchSnapshotStatus() {
+  try {
+    const res = await fetch('/api/snapshot')
+    if (!res.ok) throw new Error('api not ok')
+    const status = await res.json()
+    setState({ demoSnapshotStatus: status })
+  } catch (e) {
+    // 取得できなくても設定画面自体は問題なく使えるので、エラー表示はしない
+  }
+}
+
+async function handleDemoSnapshotSave() {
+  const adminKey = document.querySelector('#demo-admin-form input[name="adminKey"]')?.value || ''
+  if (!adminKey) { showFlash('管理用キーを入力してください'); return }
+  setState({ demoSnapshotBusy: true })
+  try {
+    const res = await fetch('/api/snapshot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save', adminKey })
+    })
+    if (res.status === 403) { setState({ demoSnapshotBusy: false }); showFlash('管理用キーが違います'); return }
+    if (!res.ok) throw new Error('api not ok')
+    setState({ demoSnapshotBusy: false })
+    showFlash('現在の状態を保存しました')
+    fetchSnapshotStatus()
+  } catch (e) {
+    setState({ demoSnapshotBusy: false })
+    showFlash('保存に失敗しました。通信状況を確認してください。')
+  }
+}
+
+async function handleDemoSnapshotRestore() {
+  const adminKey = document.querySelector('#demo-admin-form input[name="adminKey"]')?.value || ''
+  if (!adminKey) { showFlash('管理用キーを入力してください'); return }
+  if (!window.confirm('保存した状態に戻します。現在のデータは失われます。よろしいですか？')) return
+  setState({ demoSnapshotBusy: true })
+  try {
+    const res = await fetch('/api/snapshot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'restore', adminKey })
+    })
+    if (res.status === 403) { setState({ demoSnapshotBusy: false }); showFlash('管理用キーが違います'); return }
+    if (res.status === 404) { setState({ demoSnapshotBusy: false }); showFlash('保存されたスナップショットがありません'); return }
+    if (!res.ok) throw new Error('api not ok')
+    setState({ demoSnapshotBusy: false })
+    showFlash('保存した状態に戻しました')
+    fetchListings()
+    fetchOrders()
+    fetchHubs()
+  } catch (e) {
+    setState({ demoSnapshotBusy: false })
+    showFlash('復元に失敗しました。通信状況を確認してください。')
   }
 }
 
@@ -692,7 +766,12 @@ async function patchListing(id, patch) {
 }
 
 function handleProducerQuantityChange(id, value) {
-  const quantity = Math.max(0, Number(value) || 0)
+  const quantity = Number(value)
+  if (value === '' || Number.isNaN(quantity) || quantity < 0) {
+    showFlash('数量は0以上の数で入力してください')
+    fetchListings() // 不正な値を入力した欄を、サーバー上の正しい値で表示し直す(無言で0にしない)
+    return
+  }
   patchListing(id, { quantity })
 }
 
@@ -1500,7 +1579,13 @@ function renderOrderRequestSection(r) {
       ${order.lines.map(l => `<li>${escapeHtml(l.farmName)}・${escapeHtml(l.item)} ${fmtNum(effectiveLineAmount(l))}${escapeHtml(order.unit)}・${renderDeliveryMethodLabel(l)}:${renderOrderLineLabel(l.status)}${renderAmendInfo(l, order.unit)}</li>`).join('')}
     </ul>
     ${order.lines.some(l => l.status === 'pending') && order.responseDeadline ? `<p class="hint">返信期限:${new Date(order.responseDeadline).toLocaleString('ja-JP')}</p>` : ''}
-    <p class="hint">依頼の状況は「注文」タブでも確認できます。</p>
+    <div class="next-actions">
+      <p class="next-actions-label">次にできること</p>
+      <div class="actions">
+        <button type="button" data-nav="orders" class="table-btn">注文タブで詳細を見る・農家にメッセージを送る</button>
+        <button type="button" id="restart-after-order-btn" class="table-btn">別の仕入れ案も作る</button>
+      </div>
+    </div>
   `
 }
 
@@ -1862,6 +1947,7 @@ function renderIncomingOrderLine(order, l, deviceId) {
       <label>実際に用意できる数量(現在:${fmtNum(effectiveLineAmount(l))}${escapeHtml(order.unit)})
         <input type="number" name="newAmount" min="0" max="${effectiveLineAmount(l) - (order.unit === 'kg' ? 0.1 : 1)}" step="${order.unit === 'kg' ? '0.1' : '1'}" required />
       </label>
+      <p class="hint">※ 現在の数量(${fmtNum(effectiveLineAmount(l))}${escapeHtml(order.unit)})より少ない値のみ入力できます(増量は対象外です)</p>
       <label>理由<input type="text" name="reason" placeholder="例:長雨で収穫が減った" required /></label>
       <div class="actions">
         <button type="submit" class="primary table-btn">変更を送信</button>
@@ -1992,6 +2078,28 @@ function renderAccountCard() {
   `
 }
 
+// デモ運営者向け: 出品・注文・拠点・チャットは全利用者が同じ共有ストアを見ているため、発表
+// 直前に誰かの操作でデモ用データが変わってしまっても、直前に保存した状態へ戻せるようにする。
+// DEMO_ADMIN_KEYが未設定の環境ではカード自体を出さない(使えない機能を見せて混乱させない)。
+function renderDemoAdminCard() {
+  const status = state.demoSnapshotStatus
+  if (!status || !status.configured) return ''
+  return `
+    <section class="panel">
+      <h3>デモ運営者向け</h3>
+      <p class="hint">${status.exists ? `最終保存:${new Date(status.savedAt).toLocaleString('ja-JP')}` : 'まだ保存されたスナップショットはありません。'}</p>
+      <p class="hint">発表直前に今の状態を保存しておくと、他の人の操作でデータが変わってしまっても保存時点に戻せます。</p>
+      <form id="demo-admin-form" class="form-grid">
+        <label>管理用キー<input type="password" name="adminKey" placeholder="DEMO_ADMIN_KEY" /></label>
+      </form>
+      <div class="actions">
+        <button type="button" id="demo-snapshot-save-btn" ${state.demoSnapshotBusy ? 'disabled' : ''}>${state.demoSnapshotBusy ? '処理中…' : '今の状態を保存する'}</button>
+        <button type="button" id="demo-snapshot-restore-btn" class="table-btn-danger" ${!status.exists || state.demoSnapshotBusy ? 'disabled' : ''}>${state.demoSnapshotBusy ? '処理中…' : '保存した状態に戻す'}</button>
+      </div>
+    </section>
+  `
+}
+
 function renderSettings() {
   const role = effectiveRole()
   // ログイン中は役割が固定されているため、切り替えスイッチ自体を出さない。
@@ -2006,6 +2114,7 @@ function renderSettings() {
       </section>
       ${renderDisplaySettingsCard()}
       ${renderAccountCard()}
+      ${renderDemoAdminCard()}
     `
   }
 
@@ -2030,6 +2139,7 @@ function renderSettings() {
       </section>
       ${renderDisplaySettingsCard()}
       ${renderAccountCard()}
+      ${renderDemoAdminCard()}
     `
   }
 
@@ -2052,6 +2162,7 @@ function renderSettings() {
     </section>
     ${renderDisplaySettingsCard()}
       ${renderAccountCard()}
+      ${renderDemoAdminCard()}
   `
 }
 
@@ -2072,6 +2183,7 @@ function attachEvents() {
       if (['restaurant', 'producer', 'rescue'].includes(key)) fetchListings()
       if (['restaurant', 'producer', 'orders'].includes(key)) fetchOrders()
       if (key === 'producer') fetchHubs() // 共通受渡拠点の選択肢は出品登録(生産者)でのみ使う
+      if (key === 'settings') fetchSnapshotStatus() // デモ運営者向けカードの表示判定・最終保存日時に使う
       if (key === 'restaurant') goToRestaurant()
       else if (key === 'producer') goToProducer()
       else setState({ screen: key })
@@ -2099,6 +2211,14 @@ function attachEvents() {
       handleOrderLineAmendSubmit(form.dataset.orderId, form.dataset.listingId, form)
     })
   })
+  // ブラウザ標準の検証メッセージは一般的な文言になりがちなため、min/max違反時は
+  // 「なぜその範囲なのか」を説明する独自メッセージに差し替える(無言で弾かれないように)。
+  document.querySelectorAll('.amend-line-form input[name="newAmount"]').forEach(input => {
+    input.addEventListener('invalid', () => {
+      input.setCustomValidity(`0以上${input.max}未満の数で、現在の数量より少ない値を入力してください`)
+    })
+    input.addEventListener('input', () => input.setCustomValidity(''))
+  })
   document.querySelectorAll('[data-chat-toggle]').forEach(btn => {
     btn.addEventListener('click', () => handleChatToggle(btn.dataset.orderId, btn.dataset.listingId))
   })
@@ -2112,6 +2232,8 @@ function attachEvents() {
   document.querySelectorAll('.chat-messages').forEach(el => { el.scrollTop = el.scrollHeight })
   document.getElementById('new-hub-toggle')?.addEventListener('click', handleNewHubToggle)
   document.getElementById('new-hub-submit')?.addEventListener('click', handleNewHubSubmit)
+  document.getElementById('demo-snapshot-save-btn')?.addEventListener('click', handleDemoSnapshotSave)
+  document.getElementById('demo-snapshot-restore-btn')?.addEventListener('click', handleDemoSnapshotRestore)
   document.getElementById('auth-request-submit')?.addEventListener('click', (e) => {
     e.preventDefault()
     const form = document.getElementById('auth-request-form')
@@ -2156,6 +2278,7 @@ function attachEvents() {
     })
   })
   document.getElementById('toggle-large-text')?.addEventListener('click', () => setState({ largeText: !state.largeText }))
+  document.getElementById('restart-after-order-btn')?.addEventListener('click', handleRestartRestaurant)
 
   document.getElementById('restaurant-register-submit')?.addEventListener('click', (e) => {
     e.preventDefault()

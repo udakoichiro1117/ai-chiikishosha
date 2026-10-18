@@ -100,7 +100,7 @@ body {
 }
 
 .content {
-  max-width: 900px;
+  max-width: 1200px;
   width: 100%;
   margin: 0 auto;
   padding: 20px 16px 40px;
@@ -548,6 +548,10 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bord
 .total-row { font-weight: 700; }
 
 .status-note { font-size: 0.85rem; color: var(--muted); margin-top: 10px; }
+
+.next-actions { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.next-actions-label { margin: 0 0 6px; font-size: 0.8rem; font-weight: 700; color: var(--muted); }
+.next-actions .actions { margin-top: 0; }
 
 .exclusions { margin-top: 12px; font-size: 0.85rem; color: var(--muted); }
 .exclusions ul { margin: 6px 0 0; padding-left: 18px; }
