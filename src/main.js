@@ -119,7 +119,26 @@ function setState(patch) {
   else if (patch.screen === 'producer' || patch.screen === 'producer-register') state.lastRole = 'producer'
   saveState()
   render()
+  if ('screen' in patch) pushScreenHistory(patch.screen)
 }
+
+// 画面遷移(state.screen)がURL/履歴に一切反映されていなかったため、ブラウザの「戻る」を
+// 押すとアプリ内の前の画面ではなく、アプリの外(直前に見ていた別サイト等)へ離脱してしまう
+// 不具合があった。ハッシュ(#画面名)でブラウザ履歴に積み、popstateで画面を復元することで、
+// 「戻る」でアプリ内を1画面ずつ戻れるようにする。
+const VALID_SCREENS = ['home', 'restaurant', 'restaurant-register', 'rescue', 'producer', 'producer-register', 'orders', 'settings']
+let suppressHistoryPush = false
+function pushScreenHistory(screen) {
+  if (suppressHistoryPush) return
+  const hash = `#${screen}`
+  if (window.location.hash !== hash) window.history.pushState({ screen }, '', hash)
+}
+window.addEventListener('popstate', (e) => {
+  const screen = (e.state && e.state.screen) || (VALID_SCREENS.includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'home')
+  suppressHistoryPush = true
+  setState({ screen })
+  suppressHistoryPush = false
+})
 
 let flashTimer = null
 function showFlash(message, extraPatch = {}) {
@@ -2202,6 +2221,12 @@ function attachEvents() {
 }
 
 render()
+// 画面(state.screen)は毎回「home」から始まる設計のため、前回セッションの再読み込み等で
+// URLに画面ハッシュ(#orders等)が残っていると実際の表示と食い違う。起動時点でクリアする
+// (?loginToken=等のクエリ文字列はhandleAuthTokenFromUrl()が別途読むため保持する)。
+if (window.location.hash) {
+  window.history.replaceState({ screen: state.screen }, '', window.location.pathname + window.location.search)
+}
 fetchListings()
 fetchOrders()
 fetchHubs()
