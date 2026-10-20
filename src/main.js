@@ -1339,6 +1339,18 @@ function renderHome() {
   `
 }
 
+// 「今すぐの操作に必要な説明」ではなく「背景・理由の補足」にあたる長い文章を、
+// 既定で畳んだ状態にする(①長い説明文の折りたたみ化)。操作に直結する説明
+// (入力例・選択肢の挙動説明・不可逆な変更の注意書き等)はここでは畳まず、常に見せる。
+function renderCollapsibleHint(text) {
+  return `
+    <details class="hint-details">
+      <summary>ℹ️ 詳しく</summary>
+      <p class="hint">${text}</p>
+    </details>
+  `
+}
+
 function renderRestaurantRegister() {
   const p = state.restaurantProfile || {}
   const isEdit = !!state.restaurantProfile
@@ -1352,7 +1364,7 @@ function renderRestaurantRegister() {
     `}
     <section class="panel">
       <h2>${isEdit ? '受取条件の編集' : '① 受取条件を設定'}</h2>
-      <p class="hint">この画面の目的は店舗の登録ではなく、「欲しい食材・数量・受取条件を伝えること」の準備です。ここで決めた内容は次の②の初期値になり、自然文で省略しても自動的に補われます。あとからいつでも変更できます。</p>
+      ${renderCollapsibleHint('この画面の目的は店舗の登録ではなく、「欲しい食材・数量・受取条件を伝えること」の準備です。ここで決めた内容は次の②の初期値になり、自然文で省略しても自動的に補われます。あとからいつでも変更できます。')}
       ${isEdit ? `
         <div class="current-settings">
           <span class="current-settings-label">現在の設定</span>
@@ -1405,7 +1417,7 @@ function renderProducerRegister() {
     `}
     <section class="panel">
       <h2>${isEdit ? '農園情報の編集' : '① 入口:農園情報の登録'}</h2>
-      <p class="hint">初回のみ入力します。次回以降はこの端末で自動的にログイン状態が保たれ、この画面は表示されません。</p>
+      ${renderCollapsibleHint('初回のみ入力します。次回以降はこの端末で自動的にログイン状態が保たれ、この画面は表示されません。')}
       ${isEdit ? `
         <div class="current-settings">
           <span class="current-settings-label">現在の設定</span>
@@ -1672,7 +1684,8 @@ function renderRescue() {
   return `
     <section class="panel">
       <h2>⏰ おまかせフードロス救済</h2>
-      <p class="hint">鮮度期限が近い(目安:葉物は当日〜翌日、果菜類は2〜3日)、近隣(半径${MATCH_RADIUS_KM}km)の余剰を品目を問わずおまかせで提案します。メニューの穴埋めにどうぞ。</p>
+      <p class="hint">期限が近い近隣の余剰を、品目を問わずおまかせで提案します。メニューの穴埋めにどうぞ。</p>
+      ${renderCollapsibleHint(`対象の目安:鮮度期限が近い(葉物は当日〜翌日、果菜類は2〜3日)、近隣(半径${MATCH_RADIUS_KM}km)の出品です。`)}
       ${renderProducersStatus()}
       ${suggestions.length === 0
         ? `<p class="hint">いまのところ、期限が近い近隣の余剰はありません。</p>`
@@ -2111,7 +2124,8 @@ function renderAccountCard() {
   return `
     <section class="panel">
       <h3>アカウント</h3>
-      <p class="hint">メールアドレスを登録すると、機種変更やブラウザのデータ削除があっても、別の端末から自分の出品・注文にアクセスできるようになります(パスワードは不要です)。</p>
+      <p class="hint">機種変更やブラウザのデータ削除があっても安心(パスワードは不要です)。</p>
+      ${renderCollapsibleHint('メールアドレスを登録すると、機種変更やブラウザのデータ削除があっても、別の端末から自分の出品・注文にアクセスできるようになります。')}
       <form id="auth-request-form" class="form-grid">
         <label>メールアドレス<input type="email" name="email" required placeholder="例:mikami@example.com" /></label>
         ${role ? `
@@ -2141,7 +2155,7 @@ function renderDemoAdminCard() {
     <section class="panel">
       <h3>デモ運営者向け</h3>
       <p class="hint">${status.exists ? `最終保存:${new Date(status.savedAt).toLocaleString('ja-JP')}` : 'まだ保存されたスナップショットはありません。'}</p>
-      <p class="hint">発表直前に今の状態を保存しておくと、他の人の操作でデータが変わってしまっても保存時点に戻せます。</p>
+      ${renderCollapsibleHint('発表直前に今の状態を保存しておくと、他の人の操作でデータが変わってしまっても保存時点に戻せます。')}
       <form id="demo-admin-form" class="form-grid">
         <label>管理用キー<input type="password" name="adminKey" placeholder="DEMO_ADMIN_KEY" /></label>
       </form>
