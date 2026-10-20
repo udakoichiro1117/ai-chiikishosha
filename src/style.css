@@ -248,7 +248,8 @@ body {
   background: var(--role-soft, var(--accent-soft));
   border-color: var(--role-accent, var(--accent));
 }
-.value-prop h3 { margin: 0 0 8px; font-size: 0.95rem; color: var(--role-accent, var(--accent)); }
+.value-prop summary { cursor: pointer; font-size: 0.95rem; font-weight: 700; color: var(--role-accent, var(--accent)); }
+.value-prop[open] summary { margin-bottom: 8px; }
 .value-prop p { margin: 0 0 8px; font-size: 0.85rem; line-height: 1.6; }
 .value-prop p:last-child { margin-bottom: 0; }
 

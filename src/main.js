@@ -1344,11 +1344,11 @@ function renderRestaurantRegister() {
   const isEdit = !!state.restaurantProfile
   return `
     ${isEdit ? '' : `
-      <section class="panel value-prop">
-        <h3>なぜこのアプリ？</h3>
+      <details class="panel value-prop">
+        <summary>なぜこのアプリ？</summary>
         <p>中央卸売市場で直接買い付けるには資格や実績が必要で、個人店にはハードルが高いのが実情です。かといって、出品中の農家を毎回1件ずつ見比べて選ぶのも大変です。</p>
         <p>このアプリでは、欲しい食材・量を伝えるだけで、近隣の複数の農家から必要な分だけをAIが自動で組み合わせます。1軒で足りなければ、他の農家を足して希望量ちょうどに。</p>
-      </section>
+      </details>
     `}
     <section class="panel">
       <h2>${isEdit ? '受取条件の編集' : '① 受取条件を設定'}</h2>
@@ -1397,11 +1397,11 @@ function renderProducerRegister() {
   const isEdit = !!state.producerProfile
   return `
     ${isEdit ? '' : `
-      <section class="panel value-prop">
-        <h3>なぜこのアプリ？</h3>
+      <details class="panel value-prop">
+        <summary>なぜこのアプリ？</summary>
         <p>卸売市場では、形が不揃いな規格外品や、見積もりより多く穫れた余剰分は、値段がつかず出荷できないことがあります。</p>
         <p>このアプリでは、そうした規格外・余剰の食材にも自分で値段をつけて、近隣の飲食店に直接販売できます。捨てるはずだったものが、収入になります。</p>
-      </section>
+      </details>
     `}
     <section class="panel">
       <h2>${isEdit ? '農園情報の編集' : '① 入口:農園情報の登録'}</h2>
