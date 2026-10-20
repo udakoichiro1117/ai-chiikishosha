@@ -1144,11 +1144,16 @@ function initResultMapIfNeeded() {
   })
 }
 
+// ボトムナビは「ホーム・役割スロット・プロフィール」の3項目に絞っている(以前は
+// 仕入れ・おまかせ救済・出品・注文・設定の最大6項目があり、スマホで誤タップしやすかった)。
+// おまかせ救済・注文は各役割画面内のタブ(renderRestaurantTabBar/renderProducerTabBar)に
+// 統合したため、画面としては残っていてもボトムナビ上の独立項目ではなくなった。
+// そのぶん「今どの役割の文脈にいるか」をハイライトで示す必要があるため、
+// rescue/ordersもそれぞれ該当する役割スロットにマッピングする。
 function activeNavKey() {
-  if (state.screen === 'restaurant' || state.screen === 'restaurant-register') return 'restaurant'
+  if (state.screen === 'restaurant' || state.screen === 'restaurant-register' || state.screen === 'rescue') return 'restaurant'
   if (state.screen === 'producer' || state.screen === 'producer-register') return 'producer'
-  if (state.screen === 'rescue') return 'rescue'
-  if (state.screen === 'orders') return 'orders'
+  if (state.screen === 'orders') return effectiveRole() === 'producer' ? 'producer' : 'restaurant'
   if (state.screen === 'settings') return 'settings'
   return 'home'
 }
@@ -1160,22 +1165,48 @@ function renderSidebar() {
       <span class="nav-icon">${icon}</span><span class="nav-label">${label}</span>
     </button>
   `
-  // ログイン中は役割が固定されているため、反対側の役割の画面はそもそもナビに出さない。
-  // 未ログインの場合は従来どおり両方を試せるようにする。
-  const showRestaurant = state.userRole !== 'producer'
-  const showProducer = state.userRole !== 'restaurant'
+  // 役割スロットは1つだけ表示する。ログイン中はuserRole、未ログインでも直近に開いた
+  // 画面(lastRole)が分かっていればそちらを優先し、何も分からなければ仕入れを既定にする。
+  // 反対側の役割を試したい場合はホーム画面の2ブロックから切り替える。
+  const roleSlot = effectiveRole() === 'producer'
+    ? item('producer', '🌱', '出品')
+    : item('restaurant', '🛒', '仕入れ')
   return `
     <nav class="sidebar">
       <div class="sidebar-brand"><span class="sidebar-brand-icon">🌱</span>AI地域商社</div>
       <div class="sidebar-nav">
         ${item('home', '🏠', 'ホーム')}
-        ${showRestaurant ? item('restaurant', '🛒', '仕入れ') : ''}
-        ${showRestaurant ? item('rescue', '⏰', 'おまかせ救済') : ''}
-        ${showProducer ? item('producer', '🌱', '出品') : ''}
-        ${item('orders', '📦', '注文')}
-        ${item('settings', '⚙️', '設定')}
+        ${roleSlot}
+        ${item('settings', '👤', 'プロフィール')}
       </div>
     </nav>
+  `
+}
+
+// 仕入れ・おまかせ救済・注文状況は、すべて飲食店の文脈の中の1画面として扱う。
+// data-nav属性は既存のナビクリックハンドラをそのまま再利用する(ボトムナビと同じ仕組み)。
+function renderRestaurantTabBar(active) {
+  const tab = (key, icon, label) => `
+    <button class="subtab ${active === key ? 'active' : ''}" data-nav="${key}">${icon} ${label}</button>
+  `
+  return `
+    <div class="subtab-bar">
+      ${tab('restaurant', '🛒', '仕入れを作る')}
+      ${tab('rescue', '⏰', 'おまかせ救済')}
+      ${tab('orders', '📦', '注文状況')}
+    </div>
+  `
+}
+
+function renderProducerTabBar(active) {
+  const tab = (key, icon, label) => `
+    <button class="subtab ${active === key ? 'active' : ''}" data-nav="${key}">${icon} ${label}</button>
+  `
+  return `
+    <div class="subtab-bar">
+      ${tab('producer', '🌱', '出品する')}
+      ${tab('orders', '📦', '届いた注文')}
+    </div>
   `
 }
 
@@ -1196,10 +1227,14 @@ function renderScreen() {
     case 'home': return renderHome()
     case 'restaurant-register': return `<div class="role-restaurant">${renderRestaurantRegister()}</div>`
     case 'producer-register': return `<div class="role-producer">${renderProducerRegister()}</div>`
-    case 'restaurant': return `<div class="role-restaurant">${renderRestaurant()}</div>`
-    case 'rescue': return `<div class="role-restaurant">${renderRescue()}</div>`
-    case 'producer': return `<div class="role-producer">${renderProducer()}</div>`
-    case 'orders': return renderRoleWrapped(renderOrders())
+    case 'restaurant': return `<div class="role-restaurant">${renderRestaurantTabBar('restaurant')}${renderRestaurant()}</div>`
+    case 'rescue': return `<div class="role-restaurant">${renderRestaurantTabBar('rescue')}${renderRescue()}</div>`
+    case 'producer': return `<div class="role-producer">${renderProducerTabBar('producer')}${renderProducer()}</div>`
+    case 'orders': {
+      const role = effectiveRole()
+      const tabBar = role === 'producer' ? renderProducerTabBar('orders') : role === 'restaurant' ? renderRestaurantTabBar('orders') : ''
+      return renderRoleWrapped(`${tabBar}${renderOrders()}`)
+    }
     case 'settings': return renderRoleWrapped(renderSettings())
     default: return renderHome()
   }

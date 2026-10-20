@@ -319,6 +319,20 @@ body {
 .settings-switch-btn[data-settings-role="producer"] { border-color: var(--producer-accent); color: var(--producer-accent); }
 .settings-switch-btn[data-settings-role="producer"].active { background: var(--producer-accent); color: #fff; }
 
+/* ---- 役割画面内のタブ(仕入れを作る/おまかせ救済/注文状況、出品する/届いた注文) ---- */
+.subtab-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.subtab {
+  border: 1px solid var(--role-accent, var(--accent));
+  background: var(--surface);
+  color: var(--role-accent, var(--accent));
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.subtab.active { background: var(--role-accent, var(--accent)); color: #fff; }
+
 textarea, input[type=text], input[type=number], input[type=date], input[type=email], select {
   width: 100%;
   padding: 8px 10px;
