@@ -479,6 +479,14 @@ function handleAuthLogout() {
   fetchOrders()
 }
 
+// 匿名のまま役割を選び間違えた場合の、明示的なリセット導線(renderRoleResetLink参照)。
+// 画面内に「もう一方の役割」への切り替えボタンを常設しない代わりに、ホーム画面からの
+// 選び直しという1つの経路に戻す。
+function handleRoleReset() {
+  if (!window.confirm('別の役割として使います。ホーム画面に戻りますが、よろしいですか？')) return
+  setState({ lastRole: null, screen: 'home' })
+}
+
 // 起動時、メール内のログインリンク(?loginToken=...)を踏んでいればログイン状態にする。
 async function handleAuthTokenFromUrl() {
   const token = new URLSearchParams(window.location.search).get('loginToken')
@@ -1295,16 +1303,16 @@ function renderHome() {
     ` : ''}
 
     <section class="role-gate">
-      <p class="role-gate-label">${state.userRole ? '' : 'どちらで使いますか？'}</p>
+      <p class="role-gate-label">${effectiveRole() ? '' : 'どちらで使いますか？'}</p>
       <div class="role-gate-blocks">
-        ${state.userRole !== 'producer' ? `
+        ${effectiveRole() !== 'producer' ? `
         <button class="role-gate-block role-gate-restaurant" data-nav="restaurant">
           <span class="role-gate-decor" aria-hidden="true">🏪</span>
           <span class="role-gate-title">飲食店</span>
           <span class="role-gate-action">仕入れ案を作る<span class="role-gate-arrow">→</span></span>
           <p class="role-gate-why">欲しい量を伝えるだけで、近隣の複数の農家から自動で組み合わせます</p>
         </button>` : ''}
-        ${state.userRole !== 'restaurant' ? `
+        ${effectiveRole() !== 'restaurant' ? `
         <button class="role-gate-block role-gate-producer" data-nav="producer">
           <span class="role-gate-decor" aria-hidden="true">🌾</span>
           <span class="role-gate-title">生産者</span>
@@ -1859,8 +1867,7 @@ function renderOrders() {
     return `
       <section class="panel">
         <h2>注文</h2>
-        <p class="hint">「仕入れ」または「出品」を一度開くと、その役割の注文状況だけがここに表示されます。</p>
-        ${renderSettingsSwitch()}
+        <p class="hint">「仕入れ」または「出品」をホーム画面から選ぶと、その役割の注文状況だけがここに表示されます。</p>
       </section>
     `
   }
@@ -2050,14 +2057,15 @@ function renderChatPanel(order, l) {
   `
 }
 
-function renderSettingsSwitch() {
-  const role = state.lastRole
-  return `
-    <div class="settings-switch">
-      <button class="settings-switch-btn ${role === 'restaurant' ? 'active' : ''}" data-settings-role="restaurant">飲食店の設定</button>
-      <button class="settings-switch-btn ${role === 'producer' ? 'active' : ''}" data-settings-role="producer">生産者の設定</button>
-    </div>
-  `
+// 生産者・飲食店で画面を完全に分けたい(同じ画面に両方の設定が同居するのをやめたい)という
+// 要望を受けて、画面を切り替えるボタン(旧renderSettingsSwitch)は廃止した。役割を変えたい
+// 場合は必ずホーム画面の2ブロックから選び直す(=renderRoleResetLinkで明示的にリセットする)
+// という1つの経路に統一し、設定画面の中に「もう一方の役割」の気配を残さないようにしている。
+function renderRoleResetLink() {
+  // ログイン済みアカウントは役割が恒久的に固定されるため、ここには出さない(api/auth.jsの
+  // コメント参照:1アカウント=1役割)。匿名のまま役割を選び間違えた場合のための導線。
+  if (state.userEmail || !effectiveRole()) return ''
+  return `<p class="role-reset-hint"><button type="button" class="link-btn" id="role-reset-btn">別の役割として使う(ホーム画面からやり直します)</button></p>`
 }
 
 function renderDisplaySettingsCard() {
@@ -2147,15 +2155,12 @@ function renderDemoAdminCard() {
 
 function renderSettings() {
   const role = effectiveRole()
-  // ログイン中は役割が固定されているため、切り替えスイッチ自体を出さない。
-  const switchHtml = state.userRole ? '' : renderSettingsSwitch()
 
   if (!role) {
     return `
       <section class="panel">
         <h2>設定</h2>
-        <p class="hint">「仕入れ」または「出品」を一度開くと、その役割の設定だけがここに表示されます。先に下から選ぶこともできます。</p>
-        ${switchHtml}
+        <p class="hint">「仕入れ」または「出品」をホーム画面から選ぶと、その役割の設定だけがここに表示されます。</p>
       </section>
       ${renderDisplaySettingsCard()}
       ${renderAccountCard()}
@@ -2168,7 +2173,6 @@ function renderSettings() {
     return `
       <section class="panel">
         <h2>設定(飲食店)</h2>
-        ${switchHtml}
       </section>
       <section class="panel">
         <h3>受取条件</h3>
@@ -2185,6 +2189,7 @@ function renderSettings() {
       ${renderDisplaySettingsCard()}
       ${renderAccountCard()}
       ${renderDemoAdminCard()}
+      ${renderRoleResetLink()}
     `
   }
 
@@ -2192,7 +2197,6 @@ function renderSettings() {
   return `
     <section class="panel">
       <h2>設定(生産者)</h2>
-      ${switchHtml}
     </section>
     <section class="panel">
       <h3>農園情報</h3>
@@ -2208,6 +2212,7 @@ function renderSettings() {
     ${renderDisplaySettingsCard()}
       ${renderAccountCard()}
       ${renderDemoAdminCard()}
+      ${renderRoleResetLink()}
   `
 }
 
@@ -2293,9 +2298,7 @@ function attachEvents() {
   document.querySelectorAll('[data-goto]').forEach(btn => {
     btn.addEventListener('click', () => setState({ screen: btn.dataset.goto }))
   })
-  document.querySelectorAll('[data-settings-role]').forEach(btn => {
-    btn.addEventListener('click', () => setState({ lastRole: btn.dataset.settingsRole }))
-  })
+  document.getElementById('role-reset-btn')?.addEventListener('click', handleRoleReset)
   document.querySelectorAll('.zip-lookup-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const zipInput = document.getElementById(btn.dataset.zipInput)

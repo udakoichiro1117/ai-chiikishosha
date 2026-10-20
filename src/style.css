@@ -304,20 +304,7 @@ body {
 }
 .hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 10px; }
 
-.settings-switch { display: flex; gap: 8px; flex-wrap: wrap; }
-.settings-switch-btn {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--muted);
-  padding: 7px 16px;
-  border-radius: 999px;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-.settings-switch-btn[data-settings-role="restaurant"] { border-color: var(--restaurant-accent); color: var(--restaurant-accent); }
-.settings-switch-btn[data-settings-role="restaurant"].active { background: var(--restaurant-accent); color: #fff; }
-.settings-switch-btn[data-settings-role="producer"] { border-color: var(--producer-accent); color: var(--producer-accent); }
-.settings-switch-btn[data-settings-role="producer"].active { background: var(--producer-accent); color: #fff; }
+.role-reset-hint { margin: 4px 0 0; padding: 0 4px; font-size: 0.8rem; }
 
 /* ---- 役割画面内のタブ(仕入れを作る/おまかせ救済/注文状況、出品する/届いた注文) ---- */
 .subtab-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
