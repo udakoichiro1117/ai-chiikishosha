@@ -1179,6 +1179,15 @@ function renderSidebar() {
   `
 }
 
+// 「注文」「設定」は仕入れ・出品と違い役割別のdivで囲まれておらず、ホーム画面の
+// 色分けされたゲートを通ってもこの2画面だけ色の手がかりが消えてしまっていた。
+// 直近使っていた役割(effectiveRole())が分かっていれば、同じ色分けを適用する。
+function renderRoleWrapped(html) {
+  const role = effectiveRole()
+  if (!role) return html
+  return `<div class="role-${role}">${html}</div>`
+}
+
 // 生産者側は年齢層が比較的高いと想定し(研究ノート参照:ポケットマルシェ登録生産者の
 // 平均年齢48歳、上昇傾向)、文字・ボタンを大きくし、見える項目数を絞ったUIにする。
 // 飲食店側(三上さん想定・38歳)は通常サイズのまま。
@@ -1190,8 +1199,8 @@ function renderScreen() {
     case 'restaurant': return `<div class="role-restaurant">${renderRestaurant()}</div>`
     case 'rescue': return `<div class="role-restaurant">${renderRescue()}</div>`
     case 'producer': return `<div class="role-producer">${renderProducer()}</div>`
-    case 'orders': return renderOrders()
-    case 'settings': return renderSettings()
+    case 'orders': return renderRoleWrapped(renderOrders())
+    case 'settings': return renderRoleWrapped(renderSettings())
     default: return renderHome()
   }
 }
@@ -1499,6 +1508,7 @@ function renderResult() {
       <h2>④ 仕入れ案</h2>
       ${r.diffNotices && r.diffNotices.length ? `<p class="diff-notice">${r.diffNotices.map(escapeHtml).join(' ')}</p>` : ''}
       <p class="formula-line">${formula} ＝ <strong>${fmtNum(r.totalQuantity)}</strong></p>
+      ${r.reason ? `<p class="allocation-reason">💡 ${escapeHtml(r.reason)}</p>` : ''}
       <div class="summary-line">
         <span>希望数量を満たすか<strong>満たす</strong></span>
         <span>いつ・どこで受け取るか<strong>${escapeHtml(r.neededDate)} ${escapeHtml(r.deliveryTime || '')} ${escapeHtml(r.deliveryLocation || '')}</strong></span>

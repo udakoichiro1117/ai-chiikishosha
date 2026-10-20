@@ -42,6 +42,18 @@ function possibleContributions(farm) {
   return values
 }
 
+// 採用した組み合わせの理由を一言で説明する(「なぜこの農家の組み合わせになったのか」が
+// 結果だけでは伝わらないため)。優先順位は実際の判定ロジックと同じ:農家数が少ない→総額が低い。
+function describeAllocationReason({ farmCount, distinctFarmSetCount }) {
+  const base = farmCount === 1
+    ? '1農家の在庫だけで希望量を満たせました。'
+    : `1農家では希望量に届かなかったため、必要な農家数が最も少ない${farmCount}農家の組み合わせを選びました。`
+  if (distinctFarmSetCount > 1) {
+    return `${base}同じ${farmCount}農家の組み合わせが複数あったため、その中で総額が最も低いものを採用しています。`
+  }
+  return base
+}
+
 function classifyExclusion(request, farm) {
   if (farm.available === false) return '欠品・出荷停止中'
   if (farm.item !== request.item) return '品目が異なる'
@@ -94,7 +106,9 @@ export function computeAllocation(request, producers) {
     combos.push(subset)
   }
 
-  let bestExact = null
+  // 比較しながら1件だけ残すのではなく、一致した組み合わせを全て集めておく。
+  // 採用理由(同じ農家数の組み合わせが他に無かったか等)を説明するために必要なため。
+  const exactCandidates = []
   for (const subset of combos) {
     const perFarmOptions = subset.map(possibleContributions)
     const picks = new Array(subset.length).fill(0)
@@ -108,10 +122,7 @@ export function computeAllocation(request, producers) {
             distanceKm: hasCoords(request) && hasCoords(farm) ? distanceKm(request.lat, request.lng, farm.lat, farm.lng) : null
           }))
           const totalPrice = allocation.reduce((s, a) => s + a.amount * a.farm.unitPrice, 0)
-          const candidate = { allocation, totalPrice, farmCount: allocation.length }
-          if (!bestExact) bestExact = candidate
-          else if (candidate.farmCount < bestExact.farmCount) bestExact = candidate
-          else if (candidate.farmCount === bestExact.farmCount && candidate.totalPrice < bestExact.totalPrice) bestExact = candidate
+          exactCandidates.push({ allocation, totalPrice, farmCount: allocation.length })
         }
         return
       }
@@ -126,7 +137,14 @@ export function computeAllocation(request, producers) {
     search(0, request.quantity)
   }
 
-  if (bestExact) {
+  if (exactCandidates.length > 0) {
+    // 農家数が少ない順、同数なら総額が低い順(実際の判定ロジックと同じ優先順位)。
+    const minFarmCount = Math.min(...exactCandidates.map(c => c.farmCount))
+    const sameFarmCountCandidates = exactCandidates.filter(c => c.farmCount === minFarmCount)
+    const bestExact = sameFarmCountCandidates.reduce((best, c) => (c.totalPrice < best.totalPrice ? c : best))
+    // 農家の顔ぶれ(IDの組み合わせ)が違うものだけを数える。同じ農家の配分違いは「別の組み合わせ」として説明しない。
+    const distinctFarmSetCount = new Set(sameFarmCountCandidates.map(c => c.allocation.map(a => a.farm.id).sort().join(','))).size
+
     return {
       status: 'success',
       allocation: bestExact.allocation,
@@ -135,6 +153,7 @@ export function computeAllocation(request, producers) {
       deliveryLocation: bestExact.allocation[0].farm.deliveryLocation,
       deliveryTime: bestExact.allocation[0].farm.deliveryTime,
       neededDate: request.neededDate,
+      reason: describeAllocationReason({ farmCount: minFarmCount, distinctFarmSetCount }),
       exclusions
     }
   }
