@@ -99,6 +99,12 @@ export const OSAKA_CITY_OPTIONS = [
   '大阪狭山市', '阪南市'
 ]
 
+// 飲食店側のデモ文は、生産者側のデモ出品(buildDefaultProducers)と同じ値から
+// 組み立てる。別々に書くと、片方だけ数量や品目を変えたときに嚙み合わなくなるため。
 export function buildDefaultRequestText() {
-  return '明後日までに大阪近郊のトマトを10kg、多少形が悪くてもOK'
+  const producers = buildDefaultProducers()
+  const totalQuantity = producers.reduce((sum, p) => sum + p.quantity, 0)
+  const { item, unit, region } = producers[0]
+  const offGradeNote = producers.some((p) => p.isOffGrade) ? '、多少形が悪くてもOK' : ''
+  return `明後日までに${region}の${item}を${totalQuantity}${unit}${offGradeNote}`
 }

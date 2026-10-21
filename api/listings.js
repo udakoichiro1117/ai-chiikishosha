@@ -33,19 +33,32 @@ async function readAllListings() {
   return items.filter(Boolean)
 }
 
-// ストアが空(=このプロジェクトで誰も出品したことがない)の場合のみ、
-// 03spec.mdのデモシナリオ(A/B/C農家・トマト5,350円)を1回だけ投入する。
-// ownerIdを実デバイスのUUIDと衝突しない'seed'にするため、以後は通常のUIからは編集・削除できない。
-async function seedIfEmpty() {
-  const { blobs } = await list({ prefix: PREFIX, limit: 1 })
-  if (blobs.length > 0) return
-  const demo = buildDefaultProducers()
+function todayStr() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+// デモ出品(A/B/C農家、03spec.mdのデモシナリオ)は、読み込みのたびに「出荷可能日が
+// 今日より前(=もう二度とマッチしようがない)」場合だけ、現在時刻基準の新しい内容に
+// 自動で作り直す。在庫を使い切っただけ(出荷可能日はまだ有効)の場合は実際の利用結果
+// としてそのまま残す(無言で元に戻すと、承認や在庫減少の動作確認ができなくなるため)。
+// ownerIdを実デバイスのUUIDと衝突しない'seed'にするため、通常のUIからは編集・削除できない。
+async function ensureDemoListingsFresh() {
+  const fresh = buildDefaultProducers()
+  const today = todayStr()
   await Promise.all(
-    demo.map((p) => {
+    fresh.map(async (p) => {
+      const pathname = pathFor(p.id)
+      const current = await readListing(pathname)
+      const isStale = !current || current.availableDate < today
+      if (!isStale) return
       // デモのA/B/C農家は「共通受渡拠点」想定(元々の03spec.mdのデモ設定)なので、既定はpickupにする。
       // また、すぐ仕入れられるデモ用在庫として扱うためconfirmed(収穫済み・在庫確定)にする。
       const listing = { ...p, ownerId: SEED_OWNER, deliveryMethod: 'pickup', stockStatus: 'confirmed', expiryDate: computeExpiryDate(p.availableDate, p.item) }
-      return put(pathFor(p.id), JSON.stringify(listing), {
+      await put(pathname, JSON.stringify(listing), {
         access: 'private',
         addRandomSuffix: false,
         allowOverwrite: true,
@@ -58,7 +71,7 @@ async function seedIfEmpty() {
 export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
-      await seedIfEmpty()
+      await ensureDemoListingsFresh()
       const listings = await readAllListings()
       res.status(200).json({ listings })
       return
