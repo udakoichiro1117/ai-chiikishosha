@@ -1,16 +1,29 @@
 // デモ用の初期データ。仕様書8.「課題が解けた瞬間」のA/B/C農家をそのまま再現する。
 // 日付は実行日を基準にした相対日付（明後日）で生成し、いつ実行しても成立するようにする。
 
-// toISOString()はUTCへ変換するため、JST(UTC+9)環境では日付が1日ずれることがある
-// (例:日付をまたぐ深夜0時〜9時台のJSTで、UTCではまだ前日)。
-// parser.jsのformatLocalDateと同じ理由で、ローカルの年月日をそのまま文字列化する。
-function addDays(base, days) {
-  const d = new Date(base)
-  d.setDate(d.getDate() + days)
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+// このファイルはクライアント(ユーザーのブラウザ、実質JST)とサーバー(api/listings.js経由、
+// Vercelの既定タイムゾーンは協定世界時)の両方から呼ばれる。実行環境のローカルタイムゾーンに
+// 依存すると、JST深夜〜朝(UTCではまだ前日)の時間帯にサーバー側だけ「今日」が1日ずれ、
+// サーバー側で生成した出品の出荷可能日と、api/parse.js(こちらは常にJSTで解決する)が
+// 読み取った希望日が食い違ってマッチしなくなる。api/parse.jsと同じ方式で、常に日本時間の
+// 「今日」を基準にする。
+function todayJstStr() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date())
+}
+
+// 上記のtodayJstStr()で得た「年-月-日」に対して、実行環境のタイムゾーンに影響されない
+// UTC日付演算で日数を加算する(Dateオブジェクトのローカルgetter/setterを使うと、結局
+// 実行環境のタイムゾーンに逆戻りしてしまうため)。
+function addDays(dateStr, days) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + days)
+  const yy = dt.getUTCFullYear()
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
 }
 
 export const DEMO_REGION = '大阪近郊'
@@ -18,7 +31,7 @@ export const DEMO_LOCATION = '大阪近郊の共通受渡拠点P'
 export const DEMO_TIME = '10:00〜11:00'
 
 export function buildDefaultProducers() {
-  const today = new Date()
+  const today = todayJstStr()
   const dayAfterTomorrow = addDays(today, 2)
 
   return [

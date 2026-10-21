@@ -33,12 +33,13 @@ async function readAllListings() {
   return items.filter(Boolean)
 }
 
+// Vercelの実行環境は既定で協定世界時(UTC)で動くため、素のnew Date()のローカルgetterを
+// 使うと、JST深夜〜朝(UTCではまだ前日)の時間帯に「今日」が1日ずれる。api/parse.js・
+// src/data.jsと同じ方式で、常に日本時間の「今日」を基準にする。
 function todayStr() {
-  const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date())
 }
 
 // デモ出品(A/B/C農家、03spec.mdのデモシナリオ)は、読み込みのたびに「出荷可能日が
