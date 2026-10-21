@@ -2185,8 +2185,8 @@ function renderSettings() {
         <h2>設定</h2>
         <p class="hint">「仕入れ」または「出品」をホーム画面から選ぶと、その役割の設定だけがここに表示されます。</p>
       </section>
-      ${renderDisplaySettingsCard()}
       ${renderAccountCard()}
+      ${renderDisplaySettingsCard()}
       ${renderDemoAdminCard()}
     `
   }
@@ -2197,6 +2197,7 @@ function renderSettings() {
       <section class="panel">
         <h2>設定(飲食店)</h2>
       </section>
+      ${renderAccountCard()}
       <section class="panel">
         <h3>受取条件</h3>
         ${r ? `
@@ -2210,7 +2211,6 @@ function renderSettings() {
         <div class="actions"><button data-goto="restaurant-register" class="primary">${r ? '編集する' : '設定する'}</button></div>
       </section>
       ${renderDisplaySettingsCard()}
-      ${renderAccountCard()}
       ${renderDemoAdminCard()}
       ${renderRoleResetLink()}
     `
@@ -2221,6 +2221,7 @@ function renderSettings() {
     <section class="panel">
       <h2>設定(生産者)</h2>
     </section>
+    ${renderAccountCard()}
     <section class="panel">
       <h3>農園情報</h3>
       ${p ? `
@@ -2233,7 +2234,6 @@ function renderSettings() {
       <div class="actions"><button data-goto="producer-register" class="primary">${p ? '編集する' : '登録する'}</button></div>
     </section>
     ${renderDisplaySettingsCard()}
-      ${renderAccountCard()}
       ${renderDemoAdminCard()}
       ${renderRoleResetLink()}
   `
