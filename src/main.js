@@ -1909,17 +1909,26 @@ function renderProducersStatus() {
   return `<div class="actions"><button type="button" data-refresh-listings class="ghost-btn">🔄 最新の状態に更新</button></div>`
 }
 
+// 出品一覧は全生産者共有のため、自分以外の行にも編集欄・操作ボタンをそのまま出すと、
+// 触ってから初めて「別の端末で登録されたため変更できません」と弾かれることになり紛らわしい。
+// 自分の出品かどうかをここで判定し、他人の行は数量を数値のまま表示して操作ボタンも出さない
+// ようにする(サーバー側の403チェック自体は変えず、UI側で事前に区別するだけ)。
 function renderProducerTable() {
+  const ownerId = getOwnerId()
   return `
     <div class="table-scroll">
       <table class="producer-table">
         <thead><tr><th>農家</th><th>品目</th><th>数量</th><th>単価</th><th>出荷可能日</th><th>鮮度期限</th><th>規格外</th><th>在庫状況</th><th>受け渡し</th><th>状態</th><th></th></tr></thead>
         <tbody>
-          ${state.producers.map(p => `
+          ${state.producers.map(p => {
+            const isOwn = p.ownerId === ownerId
+            return `
             <tr class="${p.available === false ? 'unavailable' : ''}">
-              <td>${escapeHtml(p.farmName)}</td>
+              <td>${escapeHtml(p.farmName)}${isOwn ? ' <span class="own-badge">自分の出品</span>' : ''}</td>
               <td>${escapeHtml(p.item)}</td>
-              <td><input type="number" min="0" step="0.1" value="${p.quantity}" data-qty-id="${p.id}" style="width:5em" />${escapeHtml(p.unit)}</td>
+              <td>${isOwn
+                ? `<input type="number" min="0" step="0.1" value="${p.quantity}" data-qty-id="${p.id}" style="width:5em" />${escapeHtml(p.unit)}`
+                : `${fmtNum(p.quantity)}${escapeHtml(p.unit)}`}</td>
               <td>${fmtNum(p.unitPrice)}円</td>
               <td>${escapeHtml(p.availableDate || '')}</td>
               <td>${renderFreshnessCell(p)}</td>
@@ -1928,10 +1937,13 @@ function renderProducerTable() {
               <td>${renderDeliveryMethodLabel(p)}</td>
               <td>${p.available === false ? '出荷不可' : '出荷可能'}</td>
               <td class="table-actions">
-                <button data-toggle-id="${p.id}" class="table-btn">${p.available === false ? '出荷再開' : '出荷停止'}</button>
-                <button data-delete-id="${p.id}" class="table-btn table-btn-danger">削除</button>
+                ${isOwn ? `
+                  <button data-toggle-id="${p.id}" class="table-btn">${p.available === false ? '出荷再開' : '出荷停止'}</button>
+                  <button data-delete-id="${p.id}" class="table-btn table-btn-danger">削除</button>
+                ` : '―'}
               </td>
-            </tr>`).join('')}
+            </tr>`
+          }).join('')}
         </tbody>
       </table>
     </div>
@@ -2376,6 +2388,20 @@ function attachEvents() {
       input.setCustomValidity(`0以上${input.max}未満の数で、現在の数量より少ない値を入力してください`)
     })
     input.addEventListener('input', () => input.setCustomValidity(''))
+  })
+  // 出品ステップ③の「受け渡し方法」「在庫状況」も同じ理由(ブラウザ標準の検証メッセージは
+  // 一般的な文言になりがち)で、選び忘れたときの独自メッセージに差し替える。他の必須項目
+  // (例:共通受渡拠点の選び忘れ)には専用の案内があるのに、ここだけ素っ気ない標準メッセージ
+  // のままだと一貫しないため。
+  ;[
+    ['deliveryMethod', '受け渡し方法を1つ選んでください'],
+    ['stockStatus', '在庫状況を1つ選んでください']
+  ].forEach(([name, message]) => {
+    const radios = document.querySelectorAll(`input[name="${name}"]`)
+    radios.forEach(input => {
+      input.addEventListener('invalid', () => input.setCustomValidity(message))
+      input.addEventListener('change', () => radios.forEach(r => r.setCustomValidity('')))
+    })
   })
   document.querySelectorAll('[data-chat-toggle]').forEach(btn => {
     btn.addEventListener('click', () => handleChatToggle(btn.dataset.orderId, btn.dataset.listingId))

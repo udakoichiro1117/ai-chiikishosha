@@ -570,6 +570,7 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bord
 
 .producer-table input[type=number] { padding: 4px; }
 tr.unavailable { opacity: 0.5; }
+.own-badge { font-size: 0.68rem; padding: 1px 6px; border-radius: 999px; background: var(--accent-soft, #e8f3ec); color: var(--accent, #2f6e4f); white-space: nowrap; }
 
 .table-scroll { overflow-x: auto; }
 .producer-table { min-width: 640px; }
