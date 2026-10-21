@@ -659,7 +659,18 @@ tr.unavailable { opacity: 0.5; }
   }
   .sidebar-brand { display: none; }
   .sidebar-nav { flex-direction: row; flex: 1; justify-content: space-between; }
-  .nav-item { flex-direction: column; gap: 2px; padding: 6px 4px; flex: 1; font-size: 0.68rem; }
+  /* 3項目に絞ったことで1項目あたりの幅に余裕ができたため、タップ領域を広げ、
+     項目間に区切り線、タップ時に背景色が変わるフィードバックを付ける(誤タップ対策)。 */
+  .nav-item { flex-direction: column; gap: 4px; padding: 10px 4px; flex: 1; font-size: 0.72rem; position: relative; }
+  .nav-item:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    right: 0; top: 20%; bottom: 20%;
+    width: 1px;
+    background: var(--border);
+  }
+  .nav-item:active { background: var(--bg); }
+  .nav-icon { font-size: 1.3rem; }
   .nav-label { white-space: nowrap; }
   /* ホームインジケーターのあるiPhone等でも下部タブバーに隠れないよう、セーフエリア分を足す */
   .shell-main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }

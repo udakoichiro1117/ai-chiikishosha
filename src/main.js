@@ -213,8 +213,7 @@ function renderHubPicker() {
   }
   const options = state.hubs.map(h => {
     const count = usageCounts[h.id] || 0
-    const usage = count > 0 ? `・他の出品${count}件が利用中` : '・まだ利用している出品はありません'
-    return `<option value="${h.id}">${escapeHtml(h.name)}(${escapeHtml(h.address)})${usage}</option>`
+    return `<option value="${h.id}">${escapeHtml(h.name)}(${escapeHtml(h.address)})・利用${count}件</option>`
   }).join('')
   return `
     <div class="hub-picker">
@@ -2159,9 +2158,11 @@ function renderAccountCard() {
 function renderDemoAdminCard() {
   const status = state.demoSnapshotStatus
   if (!status || !status.configured) return ''
+  // 一般の利用者には関係が無い破壊的な機能なので、既定では畳んでおき、管理用キーを
+  // 知っている人だけが開けるようにする(①の折りたたみパターンを流用)。
   return `
-    <section class="panel">
-      <h3>デモ運営者向け</h3>
+    <details class="panel">
+      <summary>デモ運営者向け</summary>
       <p class="hint">${status.exists ? `最終保存:${new Date(status.savedAt).toLocaleString('ja-JP')}` : 'まだ保存されたスナップショットはありません。'}</p>
       ${renderCollapsibleHint('発表直前に今の状態を保存しておくと、他の人の操作でデータが変わってしまっても保存時点に戻せます。')}
       <form id="demo-admin-form" class="form-grid">
@@ -2171,7 +2172,7 @@ function renderDemoAdminCard() {
         <button type="button" id="demo-snapshot-save-btn" ${state.demoSnapshotBusy ? 'disabled' : ''}>${state.demoSnapshotBusy ? '処理中…' : '今の状態を保存する'}</button>
         <button type="button" id="demo-snapshot-restore-btn" class="table-btn-danger" ${!status.exists || state.demoSnapshotBusy ? 'disabled' : ''}>${state.demoSnapshotBusy ? '処理中…' : '保存した状態に戻す'}</button>
       </div>
-    </section>
+    </details>
   `
 }
 
