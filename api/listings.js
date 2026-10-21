@@ -46,6 +46,14 @@ function todayStr() {
 // 自動で作り直す。在庫を使い切っただけ(出荷可能日はまだ有効)の場合は実際の利用結果
 // としてそのまま残す(無言で元に戻すと、承認や在庫減少の動作確認ができなくなるため)。
 // ownerIdを実デバイスのUUIDと衝突しない'seed'にするため、通常のUIからは編集・削除できない。
+//
+// 上記の「過去になったら作り直す」判定だけでは、出荷可能日が過去になっていない日でも、
+// デモ文言(buildDefaultRequestTextの「明後日までに」)が約束する"今日+2日"からズレて
+// しまう期間が生じる(作り直しが起きた日は+2日で一致するが、翌日は実質+1日、翌々日は
+// +0日とズレていき、過去になるまでは放置されるため)。そのズレが「②で読み取った希望日」と
+// 「出品側の出荷可能日」の完全一致を崩し、デモ入力ボタンが実際にはマッチしなくなる。
+// そこで、在庫状況(数量・公開可否)はそのまま保ちつつ、出荷可能日と鮮度期限だけは
+// 毎回のアクセスで正しい相対日付("今日+2日")に合わせ直す。
 async function ensureDemoListingsFresh() {
   const fresh = buildDefaultProducers()
   const today = todayStr()
@@ -54,16 +62,27 @@ async function ensureDemoListingsFresh() {
       const pathname = pathFor(p.id)
       const current = await readListing(pathname)
       const isStale = !current || current.availableDate < today
-      if (!isStale) return
-      // デモのA/B/C農家は「共通受渡拠点」想定(元々の03spec.mdのデモ設定)なので、既定はpickupにする。
-      // また、すぐ仕入れられるデモ用在庫として扱うためconfirmed(収穫済み・在庫確定)にする。
-      const listing = { ...p, ownerId: SEED_OWNER, deliveryMethod: 'pickup', stockStatus: 'confirmed', expiryDate: computeExpiryDate(p.availableDate, p.item) }
-      await put(pathname, JSON.stringify(listing), {
-        access: 'private',
-        addRandomSuffix: false,
-        allowOverwrite: true,
-        contentType: 'application/json'
-      })
+      if (isStale) {
+        // デモのA/B/C農家は「共通受渡拠点」想定(元々の03spec.mdのデモ設定)なので、既定はpickupにする。
+        // また、すぐ仕入れられるデモ用在庫として扱うためconfirmed(収穫済み・在庫確定)にする。
+        const listing = { ...p, ownerId: SEED_OWNER, deliveryMethod: 'pickup', stockStatus: 'confirmed', expiryDate: computeExpiryDate(p.availableDate, p.item) }
+        await put(pathname, JSON.stringify(listing), {
+          access: 'private',
+          addRandomSuffix: false,
+          allowOverwrite: true,
+          contentType: 'application/json'
+        })
+        return
+      }
+      if (current.availableDate !== p.availableDate) {
+        const listing = { ...current, availableDate: p.availableDate, expiryDate: computeExpiryDate(p.availableDate, p.item) }
+        await put(pathname, JSON.stringify(listing), {
+          access: 'private',
+          addRandomSuffix: false,
+          allowOverwrite: true,
+          contentType: 'application/json'
+        })
+      }
     })
   )
 }
