@@ -217,6 +217,7 @@ function renderHubPicker() {
     const count = usageCounts[h.id] || 0
     return `<option value="${h.id}">${escapeHtml(h.name)}(${escapeHtml(h.address)})・利用${count}件</option>`
   }).join('')
+  const myHubs = state.hubs.filter(h => h.createdBy === getOwnerId())
   return `
     <div class="hub-picker">
       <label>共通受渡拠点(拠点受け渡しを選んだ場合のみ使います。他の出品の利用件数が多いほど、飲食店が1か所でまとめて受け取りやすくなります)
@@ -232,6 +233,18 @@ function renderHubPicker() {
           <label>住所・目印<input id="new-hub-address" type="text" placeholder="例:大阪府豊能郡能勢町○○" /></label>
           <button type="button" id="new-hub-submit" class="table-btn">この内容で登録する</button>
         </div>
+      ` : ''}
+      ${myHubs.length > 0 ? `
+        <details class="hint-details">
+          <summary>自分が登録した拠点を管理する(${myHubs.length}件)</summary>
+          <ul class="hub-manage-list">
+            ${myHubs.map(h => `
+              <li>${escapeHtml(h.name)}(${escapeHtml(h.address)})
+                <button type="button" class="table-btn table-btn-danger" data-hub-delete="${h.id}">削除</button>
+              </li>
+            `).join('')}
+          </ul>
+        </details>
       ` : ''}
     </div>
   `
@@ -394,6 +407,23 @@ async function handleNewHubSubmit() {
   if (hub) {
     setState({ showNewHubForm: false })
     showFlash(`拠点「${hub.name}」を登録しました。一覧から選んでください`)
+  }
+}
+
+async function handleHubDelete(id) {
+  const target = state.hubs.find(h => h.id === id)
+  const label = target ? `${target.name}(${target.address})` : 'この拠点'
+  if (!window.confirm(`${label}を削除します。元に戻せません。よろしいですか？`)) return
+  try {
+    const res = await fetch(`/api/hubs?id=${encodeURIComponent(id)}&createdBy=${encodeURIComponent(getOwnerId())}`, { method: 'DELETE' })
+    if (!res.ok) {
+      showFlash(res.status === 403 ? 'この拠点は別の端末で登録されたため削除できません' : '拠点の削除に失敗しました。通信状況を確認してください。')
+      return
+    }
+    setState({ hubs: state.hubs.filter(h => h.id !== id) })
+    showFlash(`${label}を削除しました`)
+  } catch (e) {
+    showFlash('拠点の削除に失敗しました。通信状況を確認してください。')
   }
 }
 
@@ -1181,7 +1211,7 @@ function render() {
           ${renderScreen()}
         </main>
         <footer class="scope-note">
-          このMVPが示すのは「仕入れ案の作成」までです。注文確定・在庫予約・決済・配送手配は対象外で、結果は常に「未確保」です。
+          このMVPでは、仕入れ案の作成から、生産者ごとの承認・却下による注文確定、在庫反映までを行います。決済や配送網そのものの構築は対象外です。
         </footer>
       </div>
     </div>
@@ -2360,6 +2390,9 @@ function attachEvents() {
   document.querySelectorAll('.chat-messages').forEach(el => { el.scrollTop = el.scrollHeight })
   document.getElementById('new-hub-toggle')?.addEventListener('click', handleNewHubToggle)
   document.getElementById('new-hub-submit')?.addEventListener('click', handleNewHubSubmit)
+  document.querySelectorAll('[data-hub-delete]').forEach(btn => {
+    btn.addEventListener('click', () => handleHubDelete(btn.dataset.hubDelete))
+  })
   document.getElementById('demo-snapshot-save-btn')?.addEventListener('click', handleDemoSnapshotSave)
   document.getElementById('demo-snapshot-restore-btn')?.addEventListener('click', handleDemoSnapshotRestore)
   document.getElementById('auth-request-submit')?.addEventListener('click', (e) => {

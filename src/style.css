@@ -376,6 +376,8 @@ textarea, input[type=text], input[type=number], input[type=date], input[type=ema
   border-radius: 8px;
 }
 .hub-new-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--muted); }
+.hub-manage-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; }
+.hub-manage-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
 .zip-row { display: flex; gap: 8px; align-items: center; }
 .zip-row input { flex: 1; min-width: 0; }
