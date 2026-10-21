@@ -12,7 +12,7 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
 /** @type {{
  *  screen: 'home'|'restaurant'|'producer'|'restaurant-register'|'producer-register',
  *  restaurantProfile: {storeName:string,postalCode:string,address:string,preferredRegion:string,defaultAllowOffGrade:boolean,lat?:number|null,lng?:number|null}|null,
- *  producerProfile: {farmName:string,postalCode:string,address:string,station:string,contactName:string,lat?:number|null,lng?:number|null}|null,
+ *  producerProfile: {farmName:string,postalCode:string,address:string,station:string,contactName:string,usualDeliveryLocation:string,usualDeliveryTime:string,lat?:number|null,lng?:number|null}|null,
  *  producers: any[],
  *  producersLoading: boolean,
  *  producersError: string|null,
@@ -991,6 +991,10 @@ function handleProducerRegisterSubmit(form) {
     address: String(data.get('address') || ''),
     station: String(data.get('station') || ''),
     contactName: String(data.get('contactName') || ''),
+    // 普段の受け渡し場所・時間帯(例:直売所)。出品登録のたびに入力し直さず、
+    // ここで一度登録した内容を既定値として使い回す(双方向マッチングの一環)。
+    usualDeliveryLocation: String(data.get('usualDeliveryLocation') || ''),
+    usualDeliveryTime: String(data.get('usualDeliveryTime') || ''),
     lat: null,
     lng: null
   }
@@ -1439,7 +1443,10 @@ function renderProducerRegister() {
         ${renderGeoStatus(p)}
         <label>最寄り駅<input name="station" type="text" value="${escapeHtml(p.station || '')}" placeholder="例:能勢電鉄 山下駅" /></label>
         <label>担当者名<input name="contactName" type="text" value="${escapeHtml(p.contactName || '')}" placeholder="例:森畠正輝" /></label>
+        <label>普段の受け渡し場所<input name="usualDeliveryLocation" type="text" value="${escapeHtml(p.usualDeliveryLocation || '')}" placeholder="例:森畠農園 直売所前" /></label>
+        <label>普段の受け渡し時間帯<input name="usualDeliveryTime" type="text" value="${escapeHtml(p.usualDeliveryTime || '')}" placeholder="例:10:00〜12:00" /></label>
       </form>
+      ${renderCollapsibleHint('ここで登録した場所・時間帯は、出品登録のたびに初期値として使われます(出品ごとに個別に変更することもできます)。飲食店にはこの場所まで受け取りに来てもらいます。')}
       <div class="actions">
         <button id="producer-register-submit" class="primary">${isEdit ? '保存する' : '登録して進む'}</button>
         ${isEdit ? '<button id="cancel-register">変更せずに戻る</button>' : ''}
@@ -1566,7 +1573,8 @@ function renderResult() {
       ${r.reason ? `<p class="allocation-reason">💡 ${escapeHtml(r.reason)}</p>` : ''}
       <div class="summary-line">
         <span>希望数量を満たすか<strong>満たす</strong></span>
-        <span>いつ・どこで受け取るか<strong>${escapeHtml(r.neededDate)} ${escapeHtml(r.deliveryTime || '')} ${escapeHtml(r.deliveryLocation || '')}</strong></span>
+        <span>ご希望の受取エリア<strong>${escapeHtml(state.restaurantProfile?.preferredRegion || '指定なし')}</strong></span>
+        <span>実際の受け渡し場所<strong>${escapeHtml(r.neededDate)} ${escapeHtml(r.deliveryTime || '')} ${escapeHtml(r.deliveryLocation || '')}</strong></span>
         <span>費用はいくらか<strong>${fmtNum(r.totalPrice)}円(税込)</strong></span>
       </div>
       <div class="alloc-grid">
@@ -1793,8 +1801,8 @@ function renderListingStepThree() {
       <details class="advanced-settings">
         <summary>受渡し等の詳しい設定(通常は変更しなくて大丈夫です)</summary>
         <div class="form-grid" style="margin-top:12px">
-          <label>受渡場所の目安(引き取りの場合は集合場所)<input form="listing-step3-form" name="deliveryLocation" type="text" value="${escapeHtml(DEMO_LOCATION)}" /></label>
-          <label>受渡時間帯<input form="listing-step3-form" name="deliveryTime" type="text" value="${escapeHtml(DEMO_TIME)}" /></label>
+          <label>受渡場所の目安(引き取りの場合は集合場所)<input form="listing-step3-form" name="deliveryLocation" type="text" value="${escapeHtml(state.producerProfile?.usualDeliveryLocation || DEMO_LOCATION)}" /></label>
+          <label>受渡時間帯<input form="listing-step3-form" name="deliveryTime" type="text" value="${escapeHtml(state.producerProfile?.usualDeliveryTime || DEMO_TIME)}" /></label>
           <label>最低販売量<input form="listing-step3-form" name="minQuantity" type="number" min="0" step="0.1" value="1" /></label>
           <label>販売刻み<input form="listing-step3-form" name="incrementStep" type="number" min="0.1" step="0.1" value="1" /></label>
         </div>
