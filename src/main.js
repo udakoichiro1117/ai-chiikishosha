@@ -208,14 +208,14 @@ function renderGeoStatus(profile) {
 // 共有リストなので、既存の拠点から選ぶか、その場で新しい拠点を登録できるようにする。
 // 拠点ごとに、現在その拠点を使っている出品数を数える。名前・住所だけでは
 // 「ここを選んで大丈夫か」の判断材料が無いため、他の出品の利用状況を手がかりとして示す。
-function renderHubPicker() {
+function renderHubPicker(selectedHubId) {
   const usageCounts = {}
   for (const p of state.producers) {
     if (p.hubId) usageCounts[p.hubId] = (usageCounts[p.hubId] || 0) + 1
   }
   const options = state.hubs.map(h => {
     const count = usageCounts[h.id] || 0
-    return `<option value="${h.id}">${escapeHtml(h.name)}(${escapeHtml(h.address)})・利用${count}件</option>`
+    return `<option value="${h.id}" ${selectedHubId === h.id ? 'selected' : ''}>${escapeHtml(h.name)}(${escapeHtml(h.address)})・利用${count}件</option>`
   }).join('')
   const myHubs = state.hubs.filter(h => h.createdBy === getOwnerId())
   return `
@@ -392,8 +392,41 @@ async function handleCreateHub(name, address) {
   }
 }
 
+// 拠点の新規登録は出品登録ステップ③の途中(listing-step3-form)で行われる。登録すると
+// 画面が再描画されるため、まだlistingDraftに保存されていない(フォームに入力したままの)
+// 数量・単価・規格外・受け渡し方法・在庫状況等が、再描画のたびに消えてしまっていた
+// (renderListingStepThree()はlistingDraftの内容からしかフォームを組み立てないため)。
+// 拠点の表示切り替え・登録の直前に、今の入力内容を丸ごとlistingDraftへ退避しておくことで、
+// 再描画後もそのまま残るようにする。
+function captureListingStep3DraftPatch() {
+  const form = document.getElementById('listing-step3-form')
+  if (!form) return {}
+  const data = new FormData(form)
+  const num = (key, fallback) => {
+    const raw = data.get(key)
+    return raw === null || raw === '' ? fallback : Number(raw)
+  }
+  return {
+    listingDraft: {
+      ...state.listingDraft,
+      quantity: num('quantity', state.listingDraft?.quantity),
+      unit: String(data.get('unit') || state.listingDraft?.unit || 'kg'),
+      unitPrice: num('unitPrice', state.listingDraft?.unitPrice),
+      isOffGrade: data.get('isOffGrade') === 'on',
+      offGradeReason: String(data.get('offGradeReason') || ''),
+      deliveryMethod: String(data.get('deliveryMethod') || state.listingDraft?.deliveryMethod || ''),
+      stockStatus: String(data.get('stockStatus') || state.listingDraft?.stockStatus || ''),
+      hubId: String(data.get('hubId') || state.listingDraft?.hubId || ''),
+      deliveryLocation: String(data.get('deliveryLocation') || state.listingDraft?.deliveryLocation || ''),
+      deliveryTime: String(data.get('deliveryTime') || state.listingDraft?.deliveryTime || ''),
+      minQuantity: num('minQuantity', state.listingDraft?.minQuantity ?? 1),
+      incrementStep: num('incrementStep', state.listingDraft?.incrementStep ?? 1)
+    }
+  }
+}
+
 function handleNewHubToggle() {
-  setState({ showNewHubForm: !state.showNewHubForm })
+  setState({ ...captureListingStep3DraftPatch(), showNewHubForm: !state.showNewHubForm })
 }
 
 async function handleNewHubSubmit() {
@@ -403,6 +436,7 @@ async function handleNewHubSubmit() {
     showFlash('拠点名と住所の両方を入力してください')
     return
   }
+  setState(captureListingStep3DraftPatch())
   const hub = await handleCreateHub(name, address)
   if (hub) {
     setState({ showNewHubForm: false })
@@ -1149,7 +1183,9 @@ async function handleListingStepThreeSubmit(form) {
 
   if (deliveryMethod === 'hub') {
     if (!hubId) {
-      setState({ listingSubmitError: '共通受渡拠点を選択してください(無ければ新しい拠点を登録できます)' })
+      // このsetStateも画面を再描画するため、ここで今の入力内容を保存しておかないと、
+      // エラー表示と同時に数量・単価等が消えてしまう(captureListingStep3DraftPatch()参照)。
+      setState({ ...captureListingStep3DraftPatch(), listingSubmitError: '共通受渡拠点を選択してください(無ければ新しい拠点を登録できます)' })
       return
     }
   }
@@ -1178,7 +1214,8 @@ async function handleListingStepThreeSubmit(form) {
     incrementStep: Number(data.get('incrementStep') || 1),
     deliveryFee: Number(data.get('deliveryFee') || 0)
   }
-  setState({ listingSubmitting: true, listingSubmitError: null })
+  // 送信失敗時に同じ内容のままリトライできるよう、送信前の時点でlistingDraftにも保存しておく。
+  setState({ ...captureListingStep3DraftPatch(), listingSubmitting: true, listingSubmitError: null })
   try {
     const res = await fetch('/api/listings', {
       method: 'POST',
@@ -1870,24 +1907,24 @@ function renderListingStepThree() {
       </form>
       <fieldset class="delivery-method-choice">
         <legend>受け渡し方法(いずれか選んでください)</legend>
-        <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="deliver" required /> 🚚 自分で配達する</label>
-        <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="pickup" required /> 🏃 お店に取りに来てもらう</label>
-        <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="hub" required /> 🏠 共通受渡拠点で渡す</label>
+        <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="deliver" ${d.deliveryMethod === 'deliver' ? 'checked' : ''} required /> 🚚 自分で配達する</label>
+        <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="pickup" ${d.deliveryMethod === 'pickup' ? 'checked' : ''} required /> 🏃 お店に取りに来てもらう</label>
+        <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="hub" ${d.deliveryMethod === 'hub' ? 'checked' : ''} required /> 🏠 共通受渡拠点で渡す</label>
       </fieldset>
-      ${renderHubPicker()}
+      ${renderHubPicker(d.hubId)}
       <fieldset class="delivery-method-choice">
         <legend>在庫状況(どちらか選んでください)</legend>
-        <label class="checkbox"><input form="listing-step3-form" type="radio" name="stockStatus" value="confirmed" required /> ✅ もう収穫済み(在庫あり・すぐ出せる)</label>
-        <label class="checkbox"><input form="listing-step3-form" type="radio" name="stockStatus" value="estimated" required /> 🌱 まだ見込み(収穫前)</label>
+        <label class="checkbox"><input form="listing-step3-form" type="radio" name="stockStatus" value="confirmed" ${d.stockStatus === 'confirmed' ? 'checked' : ''} required /> ✅ もう収穫済み(在庫あり・すぐ出せる)</label>
+        <label class="checkbox"><input form="listing-step3-form" type="radio" name="stockStatus" value="estimated" ${d.stockStatus === 'estimated' ? 'checked' : ''} required /> 🌱 まだ見込み(収穫前)</label>
       </fieldset>
       <p class="hint">「収穫済み」を選ぶと、飲食店が仕入れを依頼した時点で承認不要ですぐ確定します。「見込み」は、依頼が来た後にあなたが承認/却下できます。</p>
       <details class="advanced-settings">
         <summary>受渡し等の詳しい設定(通常は変更しなくて大丈夫です)</summary>
         <div class="form-grid" style="margin-top:12px">
-          <label>受渡場所の目安(引き取りの場合は集合場所)<input form="listing-step3-form" name="deliveryLocation" type="text" value="${escapeHtml(state.producerProfile?.usualDeliveryLocation || DEMO_LOCATION)}" /></label>
-          <label>受渡時間帯<input form="listing-step3-form" name="deliveryTime" type="text" value="${escapeHtml(state.producerProfile?.usualDeliveryTime || DEMO_TIME)}" /></label>
-          <label>最低販売量<input form="listing-step3-form" name="minQuantity" type="number" min="0" step="0.1" value="1" /></label>
-          <label>販売刻み<input form="listing-step3-form" name="incrementStep" type="number" min="0.1" step="0.1" value="1" /></label>
+          <label>受渡場所の目安(引き取りの場合は集合場所)<input form="listing-step3-form" name="deliveryLocation" type="text" value="${escapeHtml(d.deliveryLocation ?? state.producerProfile?.usualDeliveryLocation ?? DEMO_LOCATION)}" /></label>
+          <label>受渡時間帯<input form="listing-step3-form" name="deliveryTime" type="text" value="${escapeHtml(d.deliveryTime ?? state.producerProfile?.usualDeliveryTime ?? DEMO_TIME)}" /></label>
+          <label>最低販売量<input form="listing-step3-form" name="minQuantity" type="number" min="0" step="0.1" value="${d.minQuantity ?? 1}" /></label>
+          <label>販売刻み<input form="listing-step3-form" name="incrementStep" type="number" min="0.1" step="0.1" value="${d.incrementStep ?? 1}" /></label>
         </div>
       </details>
       ${state.listingSubmitError ? `<p class="warn">${escapeHtml(state.listingSubmitError)}</p>` : ''}
