@@ -32,6 +32,7 @@ const STORAGE_KEY = 'ai-chiikishosha-state-v1'
  *  demoSnapshotBusy: boolean,
  *  userEmail: string|null,
  *  userRole: 'restaurant'|'producer'|null,
+ *  isAdmin: boolean,
  *  authSubmitting: boolean,
  *  authLinkSent: boolean,
  *  authError: string|null,
@@ -62,7 +63,7 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, chatThreads: {}, openChatKey: null, chatLoading: false, chatSubmitting: false, hubs: [], showNewHubForm: false, demoSnapshotStatus: null, demoSnapshotBusy: false, userEmail: getUserEmail(), userRole: getUserRole(), authSubmitting: false, authLinkSent: false, authError: null, screen: 'home' }
+      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, chatThreads: {}, openChatKey: null, chatLoading: false, chatSubmitting: false, hubs: [], showNewHubForm: false, demoSnapshotStatus: null, demoSnapshotBusy: false, userEmail: getUserEmail(), userRole: getUserRole(), isAdmin: getIsAdmin(), authSubmitting: false, authLinkSent: false, authError: null, screen: 'home' }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
@@ -97,6 +98,7 @@ function loadState() {
     demoSnapshotBusy: false,
     userEmail: getUserEmail(),
     userRole: getUserRole(),
+    isAdmin: getIsAdmin(),
     authSubmitting: false,
     authLinkSent: false,
     authError: null,
@@ -276,6 +278,9 @@ const USER_EMAIL_KEY = 'ai-chiikishosha-user-email'
 // 役割(飲食店/生産者)は1アカウントにつき1つに固定(api/auth.jsのコメント参照)。
 // ログインリンク申請時に選んだ役割がここに保存され、ログイン中はその役割の画面だけを見せる。
 const USER_ROLE_KEY = 'ai-chiikishosha-user-role'
+// 管理者アカウント(api/auth.jsのADMIN_EMAILS)だけは役割固定の対象外。
+// ログイン中でも「別の役割として使う」を表示し続け、両方の役割を行き来できるようにする。
+const USER_IS_ADMIN_KEY = 'ai-chiikishosha-user-is-admin'
 function getOwnerId() {
   try {
     return localStorage.getItem(USER_EMAIL_KEY) || getDeviceId()
@@ -297,6 +302,14 @@ function getUserRole() {
     return localStorage.getItem(USER_ROLE_KEY)
   } catch (e) {
     return null
+  }
+}
+
+function getIsAdmin() {
+  try {
+    return localStorage.getItem(USER_IS_ADMIN_KEY) === '1'
+  } catch (e) {
+    return false
   }
 }
 
@@ -471,18 +484,25 @@ function handleAuthLogout() {
   try {
     localStorage.removeItem(USER_EMAIL_KEY)
     localStorage.removeItem(USER_ROLE_KEY)
+    localStorage.removeItem(USER_IS_ADMIN_KEY)
   } catch (e) { /* no-op */ }
-  setState({ userEmail: null, userRole: null, authLinkSent: false, authError: null })
+  setState({ userEmail: null, userRole: null, isAdmin: false, authLinkSent: false, authError: null })
   // ログイン状態(=ownerId)が変わったので、自分の出品・注文一覧を取り直す。
   fetchListings()
   fetchOrders()
 }
 
-// 匿名のまま役割を選び間違えた場合の、明示的なリセット導線(renderRoleResetLink参照)。
+// 役割を選び直すための、明示的なリセット導線(renderRoleResetLink参照)。
 // 画面内に「もう一方の役割」への切り替えボタンを常設しない代わりに、ホーム画面からの
-// 選び直しという1つの経路に戻す。
+// 選び直しという1つの経路に戻す。通常は匿名利用時だけ表示するが、管理者アカウント
+// (isAdmin)はログイン中でも表示するため、その場合はuserRoleもあわせて解除する。
 function handleRoleReset() {
   if (!window.confirm('別の役割として使います。ホーム画面に戻りますが、よろしいですか？')) return
+  if (state.isAdmin) {
+    try { localStorage.removeItem(USER_ROLE_KEY) } catch (e) { /* no-op */ }
+    setState({ lastRole: null, userRole: null, screen: 'home' })
+    return
+  }
   setState({ lastRole: null, screen: 'home' })
 }
 
@@ -498,12 +518,18 @@ async function handleAuthTokenFromUrl() {
       body: JSON.stringify({ token })
     })
     if (!res.ok) throw new Error('api not ok')
-    const { email, role } = await res.json()
+    const { email, role, isAdmin } = await res.json()
     localStorage.setItem(USER_EMAIL_KEY, email)
-    if (role) localStorage.setItem(USER_ROLE_KEY, role)
-    showFlash(`${email} でログインしました`, { userEmail: email, userRole: role || null })
+    // 管理者は役割を固定しない(userRoleは設定せず、直近開いた画面=lastRoleで判定させる)。
+    if (isAdmin) {
+      localStorage.setItem(USER_IS_ADMIN_KEY, '1')
+    } else if (role) {
+      localStorage.setItem(USER_ROLE_KEY, role)
+    }
+    showFlash(isAdmin ? `${email} で管理者としてログインしました` : `${email} でログインしました`, { userEmail: email, userRole: isAdmin ? null : (role || null), isAdmin: !!isAdmin })
     fetchListings()
     fetchOrders()
+    fetchServerProfile(email)
   } catch (e) {
     showFlash('ログインリンクが無効か、有効期限が切れています。もう一度お試しください。')
   }
@@ -944,6 +970,30 @@ async function handleChatSend(orderId, listingId, form) {
   }
 }
 
+// ログイン済み(userEmail)のアカウントだけ、受取条件・農園情報をサーバーにも保存する
+// (api/profile.jsのコメント参照)。匿名利用時はこれまで通りlocalStorageだけで完結させる。
+// 失敗してもこの端末にはローカル保存済みなので、そのまま使い続けられる(致命的ではない)。
+async function fetchServerProfile(ownerId) {
+  try {
+    const res = await fetch(`/api/profile?ownerId=${encodeURIComponent(ownerId)}`)
+    if (!res.ok) return
+    const { restaurantProfile, producerProfile } = await res.json()
+    const patch = {}
+    if (restaurantProfile) patch.restaurantProfile = restaurantProfile
+    if (producerProfile) patch.producerProfile = producerProfile
+    if (Object.keys(patch).length > 0) setState(patch)
+  } catch (e) { /* 取得できなくても、この端末にローカル保存済みの内容で続行できる */ }
+}
+
+function pushServerProfile(patch) {
+  if (!state.userEmail) return
+  fetch('/api/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ownerId: getOwnerId(), ...patch })
+  }).catch(() => { /* サーバー保存に失敗しても、この端末には保存済みなので致命的ではない */ })
+}
+
 // 住所をジオコーディングし、解決できれば緯度経度をプロフィールに追記する(マッチングの距離絞り込み用)。
 // 入力が速く終わる画面遷移はブロックしない(バックグラウンドで実行し、終わり次第setStateで反映)。
 // 解決時に住所が変わっていたら(ユーザーが再編集した等)、古い結果は破棄する。
@@ -951,7 +1001,9 @@ async function geocodeAndAttach(profileKey, address) {
   const coords = await geocodeAddress(address)
   const current = state[profileKey]
   if (!coords || !current || current.address !== address) return
-  setState({ [profileKey]: { ...current, lat: coords.lat, lng: coords.lng } })
+  const updated = { ...current, lat: coords.lat, lng: coords.lng }
+  setState({ [profileKey]: updated })
+  pushServerProfile({ [profileKey]: updated })
 }
 
 function handleRestaurantRegisterSubmit(form) {
@@ -967,6 +1019,7 @@ function handleRestaurantRegisterSubmit(form) {
     lng: null
   }
   showFlash(wasEdit ? '受取条件を保存しました' : '受取条件を設定しました', { restaurantProfile, screen: 'restaurant' })
+  pushServerProfile({ restaurantProfile })
   geocodeAndAttach('restaurantProfile', restaurantProfile.address)
 }
 
@@ -998,6 +1051,7 @@ function handleProducerRegisterSubmit(form) {
     lng: null
   }
   showFlash(wasEdit ? '農園情報を保存しました' : '農園情報を登録しました', { producerProfile, screen: 'producer' })
+  pushServerProfile({ producerProfile })
   geocodeAndAttach('producerProfile', producerProfile.address)
 }
 
@@ -2084,7 +2138,8 @@ function renderChatPanel(order, l) {
 function renderRoleResetLink() {
   // ログイン済みアカウントは役割が恒久的に固定されるため、ここには出さない(api/auth.jsの
   // コメント参照:1アカウント=1役割)。匿名のまま役割を選び間違えた場合のための導線。
-  if (state.userEmail || !effectiveRole()) return ''
+  // ただし管理者アカウント(isAdmin)は役割固定の対象外なので、ログイン中でも表示する。
+  if ((state.userEmail && !state.isAdmin) || !effectiveRole()) return ''
   return `<p class="role-reset-hint"><button type="button" class="link-btn" id="role-reset-btn">別の役割として使う(ホーム画面からやり直します)</button></p>`
 }
 
@@ -2105,12 +2160,12 @@ function renderDisplaySettingsCard() {
 // ログインすると、端末の匿名UUIDの代わりにこのメールアドレスを所有権(ownerId)として使う。
 function renderAccountCard() {
   if (state.userEmail) {
-    const roleLabel = state.userRole === 'producer' ? '生産者' : state.userRole === 'restaurant' ? '飲食店' : null
+    const roleLabel = state.isAdmin ? '管理者・両方の役割を利用可' : state.userRole === 'producer' ? '生産者' : state.userRole === 'restaurant' ? '飲食店' : null
     return `
       <section class="panel">
         <h3>アカウント</h3>
-        <p class="hint">ログイン中:<strong>${escapeHtml(state.userEmail)}</strong>${roleLabel ? `(${roleLabel}アカウント)` : ''}</p>
-        <p class="hint">この端末で作成した出品・注文は、このメールアドレスでどの端末からでも管理できます。</p>
+        <p class="hint">ログイン中:<strong>${escapeHtml(state.userEmail)}</strong>${roleLabel ? `(${roleLabel})` : ''}</p>
+        <p class="hint">この端末で作成した出品・注文、受取条件・農園情報は、このメールアドレスでどの端末からでも管理できます。</p>
         <div class="actions"><button id="auth-logout-btn">ログアウトする</button></div>
       </section>
     `
@@ -2424,4 +2479,7 @@ if (window.location.hash) {
 fetchListings()
 fetchOrders()
 fetchHubs()
+// 前回のセッションからログイン済みの場合、サーバー保存済みの受取条件・農園情報を
+// 取り直す(?loginTokenを踏んだ直後の初回ログインはhandleAuthTokenFromUrl側で行う)。
+if (state.userEmail) fetchServerProfile(state.userEmail)
 handleAuthTokenFromUrl()

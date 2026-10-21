@@ -13,6 +13,11 @@
 // 役割(飲食店/生産者)は1アカウント(メールアドレス)につき1つに固定する。
 // 初回のログインリンク申請時に選んだ役割をaccounts/<email>.jsonに記録し、
 // 以後その役割以外では同じメールアドレスからログインできないようにする。
+//
+// ただし、ADMIN_EMAILS環境変数(カンマ区切り)に含まれるメールアドレスだけは例外とし、
+// この役割固定の対象外にする(毎回好きな役割でログインリンクを申請できる)。
+// その関係で、verify結果の役割は「アカウントに固定された役割」ではなく「そのトークンを
+// 発行した時点で選んだ役割」を返すようにしている(通常アカウントも含め、常にこちらを正とする)。
 
 import { put, get } from '@vercel/blob'
 import { randomBytes } from 'node:crypto'
@@ -22,6 +27,7 @@ const ACCOUNT_PREFIX = 'accounts/'
 const TOKEN_TTL_MS = 15 * 60 * 1000 // 15分
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const ROLES = ['restaurant', 'producer']
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
 
 function pathFor(token) {
   return `${PREFIX}${token}.json`
@@ -81,13 +87,16 @@ export default async function handler(req, res) {
       const role = String(body.role || '')
       if (!ROLES.includes(role)) { res.status(400).json({ error: 'invalid role' }); return }
 
-      const account = await readAccount(email)
-      if (account && account.role !== role) {
-        res.status(409).json({ error: 'role mismatch', existingRole: account.role })
-        return
-      }
-      if (!account) {
-        await writeAccount(email, { email, role, createdAt: new Date().toISOString() })
+      const isAdmin = ADMIN_EMAILS.includes(email)
+      if (!isAdmin) {
+        const account = await readAccount(email)
+        if (account && account.role !== role) {
+          res.status(409).json({ error: 'role mismatch', existingRole: account.role })
+          return
+        }
+        if (!account) {
+          await writeAccount(email, { email, role, createdAt: new Date().toISOString() })
+        }
       }
 
       const token = randomBytes(32).toString('hex')
@@ -95,6 +104,8 @@ export default async function handler(req, res) {
       const record = {
         token,
         email,
+        role,
+        isAdmin,
         createdAt: new Date(now).toISOString(),
         expiresAt: new Date(now + TOKEN_TTL_MS).toISOString(),
         used: false
@@ -125,8 +136,9 @@ export default async function handler(req, res) {
 
       record.used = true
       await writeJson(pathFor(token), record)
-      const account = await readAccount(record.email)
-      res.status(200).json({ email: record.email, role: account?.role || null })
+      // 役割は常にこのトークン発行時点の値を返す(アカウント記録ではなく)。
+      // 管理者メールは役割固定の対象外なので、申請のたびに違う役割でログインしうる。
+      res.status(200).json({ email: record.email, role: record.role || null, isAdmin: !!record.isAdmin })
       return
     }
 
