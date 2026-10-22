@@ -103,7 +103,7 @@ export default async function handler(req, res) {
       if (!ownerId) { res.status(400).json({ error: 'ownerId is required' }); return }
       if (typeof body.item !== 'string' || !body.item) { res.status(400).json({ error: 'item is required' }); return }
       if (typeof body.quantity !== 'number' || !(body.quantity > 0)) { res.status(400).json({ error: 'quantity must be a positive number' }); return }
-      if (!['deliver', 'pickup', 'hub'].includes(body.deliveryMethod)) { res.status(400).json({ error: 'deliveryMethod must be deliver, pickup, or hub' }); return }
+      if (!['deliver', 'pickup', 'hub', 'discuss'].includes(body.deliveryMethod)) { res.status(400).json({ error: 'deliveryMethod must be deliver, pickup, hub, or discuss' }); return }
       if (!['confirmed', 'estimated'].includes(body.stockStatus)) { res.status(400).json({ error: 'stockStatus must be confirmed or estimated' }); return }
 
       const id = `L${Date.now()}${Math.random().toString(36).slice(2, 8)}`

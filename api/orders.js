@@ -129,7 +129,7 @@ export default async function handler(req, res) {
           item: l.item,
           amount: l.amount,
           unitPrice: Number(l.unitPrice || 0),
-          deliveryMethod: ['deliver', 'pickup', 'hub'].includes(l.deliveryMethod) ? l.deliveryMethod : 'pickup',
+          deliveryMethod: ['deliver', 'pickup', 'hub', 'discuss'].includes(l.deliveryMethod) ? l.deliveryMethod : 'pickup',
           deliveryLocation: String(l.deliveryLocation || ''),
           deliveryTime: String(l.deliveryTime || ''),
           status: 'pending'

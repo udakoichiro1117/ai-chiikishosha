@@ -63,7 +63,7 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, chatThreads: {}, openChatKey: null, chatLoading: false, chatSubmitting: false, hubs: [], showNewHubForm: false, demoSnapshotStatus: null, demoSnapshotBusy: false, userEmail: getUserEmail(), userRole: getUserRole(), isAdmin: getIsAdmin(), authSubmitting: false, authLinkSent: false, authError: null, screen: 'home' }
+      return { restaurantProfile: null, producerProfile: null, listingDraft: null, listingStep: 2, listingText: '', photoResult: null, lastRole: null, largeText: false, showResultMap: false, ...parsed, producers: [], producersLoading: true, producersError: null, listingSubmitting: false, listingSubmitError: null, myOrders: [], incomingOrders: [], ordersLoading: true, ordersError: null, orderSubmitting: false, amendingLineKey: null, chatThreads: {}, openChatKey: null, chatLoading: false, chatSubmitting: false, hubs: [], showNewHubForm: false, aiReady: true, demoSnapshotStatus: null, demoSnapshotBusy: false, userEmail: getUserEmail(), userRole: getUserRole(), isAdmin: getIsAdmin(), authSubmitting: false, authLinkSent: false, authError: null, screen: 'home' }
     }
   } catch (e) { /* 読めない場合は初期状態にする */ }
   return {
@@ -94,6 +94,7 @@ function loadState() {
     chatSubmitting: false,
     hubs: [],
     showNewHubForm: false,
+    aiReady: true,
     demoSnapshotStatus: null,
     demoSnapshotBusy: false,
     userEmail: getUserEmail(),
@@ -119,6 +120,15 @@ function saveState() {
 }
 
 function setState(patch) {
+  // 出品登録ステップ③(listing-step3-form)を表示している間は、理由を問わずどんな
+  // setState呼び出しも画面を再描画してしまい、まだlistingDraftに保存されていない
+  // (フォームに入力したままの)内容が消えてしまう。patch自身がlistingDraftを明示的に
+  // 指定している場合(ステップ移動・下書き読み込み等)はそちらを優先し、そうでなければ
+  // 再描画の直前に今の入力内容を自動で退避しておく(ai-chiiki-shoshaの「編集中は裏側の
+  // 更新で描き直さない」という考え方を、この画面専用に適用したもの)。
+  if (state.screen === 'producer' && state.listingStep === 3 && !('listingDraft' in patch)) {
+    patch = { ...captureListingStep3DraftPatch(), ...patch }
+  }
   state = { ...state, ...patch }
   // 直近どちらの役割を開いたかを覚えておき、設定画面をその役割だけに絞り込む。
   if (patch.screen === 'restaurant' || patch.screen === 'restaurant-register' || patch.screen === 'rescue') state.lastRole = 'restaurant'
@@ -375,6 +385,21 @@ async function fetchHubs() {
   }
 }
 
+// AIキー(GEMINI_API_KEY)が未設定だと、読み取りを試してから初めて「ルールベースでした」と
+// 分かる形になり、本番で設定漏れがあった場合に気づきにくい。読み取りを試す前の時点で
+// 案内できるよう、起動時に一度だけ確認しておく(ai-chiiki-shoshaの事前表示を参考にした)。
+async function fetchStatus() {
+  try {
+    const res = await fetch('/api/status')
+    if (!res.ok) throw new Error('api not ok')
+    const { aiReady } = await res.json()
+    setState({ aiReady: !!aiReady })
+  } catch (e) {
+    // 取得できなくても、読み取り自体はこれまで通りAI→ルールベースの順で試せるため、
+    // 事前の案内が出ないだけで致命的ではない。
+  }
+}
+
 async function handleCreateHub(name, address) {
   try {
     const res = await fetch('/api/hubs', {
@@ -426,7 +451,7 @@ function captureListingStep3DraftPatch() {
 }
 
 function handleNewHubToggle() {
-  setState({ ...captureListingStep3DraftPatch(), showNewHubForm: !state.showNewHubForm })
+  setState({ showNewHubForm: !state.showNewHubForm })
 }
 
 async function handleNewHubSubmit() {
@@ -436,7 +461,6 @@ async function handleNewHubSubmit() {
     showFlash('拠点名と住所の両方を入力してください')
     return
   }
-  setState(captureListingStep3DraftPatch())
   const hub = await handleCreateHub(name, address)
   if (hub) {
     setState({ showNewHubForm: false })
@@ -1183,9 +1207,7 @@ async function handleListingStepThreeSubmit(form) {
 
   if (deliveryMethod === 'hub') {
     if (!hubId) {
-      // このsetStateも画面を再描画するため、ここで今の入力内容を保存しておかないと、
-      // エラー表示と同時に数量・単価等が消えてしまう(captureListingStep3DraftPatch()参照)。
-      setState({ ...captureListingStep3DraftPatch(), listingSubmitError: '共通受渡拠点を選択してください(無ければ新しい拠点を登録できます)' })
+      setState({ listingSubmitError: '共通受渡拠点を選択してください(無ければ新しい拠点を登録できます)' })
       return
     }
   }
@@ -1214,8 +1236,7 @@ async function handleListingStepThreeSubmit(form) {
     incrementStep: Number(data.get('incrementStep') || 1),
     deliveryFee: Number(data.get('deliveryFee') || 0)
   }
-  // 送信失敗時に同じ内容のままリトライできるよう、送信前の時点でlistingDraftにも保存しておく。
-  setState({ ...captureListingStep3DraftPatch(), listingSubmitting: true, listingSubmitError: null })
+  setState({ listingSubmitting: true, listingSubmitError: null })
   try {
     const res = await fetch('/api/listings', {
       method: 'POST',
@@ -1475,6 +1496,13 @@ function renderCollapsibleHint(text) {
   `
 }
 
+// AIキー(GEMINI_API_KEY)未設定時に、読み取りを試す前の時点で正直に案内する
+// (読み取ってから「ルールベースでした」と分かるより、事前に分かる方が親切なため)。
+function renderAiStatusNote() {
+  if (state.aiReady) return ''
+  return `<p class="ai-off-note">🔌 AIはまだ設定されていません。いまは簡易な読み取りで項目を埋めます。内容は次の画面で確認・修正できます。</p>`
+}
+
 function renderRestaurantRegister() {
   const p = state.restaurantProfile || {}
   const isEdit = !!state.restaurantProfile
@@ -1591,6 +1619,7 @@ function renderRestaurant() {
     <section class="panel">
       <h2>② 欲しい食材・数量・受取条件を伝える</h2>
       <p class="hint">自然文のまま入力できます。(例:「明後日までに大阪近郊のトマトを10kg、多少形が悪くてもOK」)</p>
+      ${renderAiStatusNote()}
       <div class="actions demo-fill-row">
         <button id="demo-fill-btn" class="ghost-btn">【デモ用】明後日までに大阪近郊のトマトを10kg、形不揃いOK を入力</button>
         <button type="button" id="request-voice-btn" class="ghost-btn">🎤 音声で入力する</button>
@@ -1851,6 +1880,7 @@ function renderListingStepTwo() {
     <section class="panel">
       <h2>② 出品内容を入力</h2>
       <p class="hint">泥がついた手でもすぐ使えるように、写真を撮るだけで品目・規格外の判定をAIが行います。数量は声で伝えてください。</p>
+      ${renderAiStatusNote()}
       <div class="actions demo-fill-row">
         <label class="ghost-btn photo-capture-btn">
           📷 写真を撮る(品目・規格外を自動判定)
@@ -1910,6 +1940,7 @@ function renderListingStepThree() {
         <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="deliver" ${d.deliveryMethod === 'deliver' ? 'checked' : ''} required /> 🚚 自分で配達する</label>
         <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="pickup" ${d.deliveryMethod === 'pickup' ? 'checked' : ''} required /> 🏃 お店に取りに来てもらう</label>
         <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="hub" ${d.deliveryMethod === 'hub' ? 'checked' : ''} required /> 🏠 共通受渡拠点で渡す</label>
+        <label class="checkbox"><input form="listing-step3-form" type="radio" name="deliveryMethod" value="discuss" ${d.deliveryMethod === 'discuss' ? 'checked' : ''} required /> 🤝 まだ決めていない(成立後に相談する)</label>
       </fieldset>
       ${renderHubPicker(d.hubId)}
       <fieldset class="delivery-method-choice">
@@ -2055,6 +2086,9 @@ function renderStockStatusLabel(p) {
 function renderDeliveryMethodLabel(d) {
   if (d.deliveryMethod === 'deliver') {
     return `🚚 生産者が配達${d.deliveryTime ? `(${escapeHtml(d.deliveryTime)})` : ''}`
+  }
+  if (d.deliveryMethod === 'discuss') {
+    return `🤝 受け渡し方法は未定(成立後に相談)`
   }
   const place = [d.deliveryLocation, d.deliveryTime].filter(Boolean).map(escapeHtml).join('・')
   if (d.deliveryMethod === 'hub') {
@@ -2575,6 +2609,7 @@ if (window.location.hash) {
 fetchListings()
 fetchOrders()
 fetchHubs()
+fetchStatus()
 // 前回のセッションからログイン済みの場合、サーバー保存済みの受取条件・農園情報を
 // 取り直す(?loginTokenを踏んだ直後の初回ログインはhandleAuthTokenFromUrl側で行う)。
 if (state.userEmail) fetchServerProfile(state.userEmail)

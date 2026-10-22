@@ -399,6 +399,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .warn { color: var(--warn); background: var(--warn-soft); padding: 8px 12px; border-radius: 6px; }
 .diff-notice { color: var(--warn); background: var(--warn-soft); padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; }
+.ai-off-note { color: var(--caution); background: var(--caution-soft); padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; }
 .allocation-reason { color: var(--role-accent, var(--accent)); background: var(--role-soft, var(--accent-soft)); padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; }
 
 .formula-line {
