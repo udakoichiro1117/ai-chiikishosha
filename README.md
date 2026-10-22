@@ -2,7 +2,9 @@
 
 関西の生産者と飲食店を、AIと確実なロジックでつなぐ仕入れマッチングサービスです。
 
-🔗 公開URL: https://ai-jimoseri.vercel.app/
+🔗 公開URL: https://ai-jimoseri-demo.vercel.app/
+
+(旧URL `ai-jimoseri.vercel.app` はVercel無料枠の利用上限超過により一時停止中のため、別アカウントの新プロジェクトに移行しています)
 
 ---
 
